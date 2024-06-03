@@ -3,7 +3,10 @@ from forward_model import ForwardModel
 from event import Event
 
 
-def setup_forward_model(n_stations=10):
+def setup_forward_model(t, n_stations=10):
+    """
+    t: array of periods
+    """
     # Bounds of search (min, max)
     x_bounds = [0, 94]
     y_bounds = [0, 80]
@@ -19,9 +22,6 @@ def setup_forward_model(n_stations=10):
         Event(lat=60.0, lon=35.0, depth=10.0, t_origin=1.0),
         Event(lat=70.0, lon=40.0, depth=15.0, t_origin=2.0),
     ]
-
-    # use dispersion curve to set priors for the model
-    # vel_s = prior_model.calculate_vel_s()
 
     """
     velocity_model = np.array(
@@ -47,11 +47,22 @@ def setup_forward_model(n_stations=10):
         velocity_model=velocity_model,
     )
 
+    # use dispersion curve to set priors for the model
+    pd_rayleigh = forward_model.get_rayleigh_phase_dispersion(t)
+
     # Set t_obs for each event
     for event in events:
-        event.get_t_obs(n_stations, station_positions, forward_model)
+        event.set_t_obs(n_stations, station_positions, forward_model)
 
     return forward_model
+
+
+def make_simulated_data():
+
+    forward_model = setup_forward_model()
+    forward_model.get_vel_s_profile(t)
+
+    # save to csv
 
 
 def run():
@@ -64,4 +75,6 @@ def plot_results():
     # plot vs. freq, wavelength, depth
     # plot of velocity model
     # plot ellipticity
-    pass
+    pd_rayleigh = forward_model.get_rayleigh_phase_dispersion(t)
+
+    vel_s_profile = forward_model.get_vel_s_profile(t)

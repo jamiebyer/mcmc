@@ -10,11 +10,11 @@ class Event:
         self.t_obs_p = None
         self.t_obs_s = None
 
-    def get_t_obs(self, n_stations, station_positions, prior_model):
+    def set_t_obs(self, n_stations, station_positions, prior_model):
         times_p, times_s = self.get_times(station_positions, prior_model)
 
         self.t_obs_p = times_p + prior_model.sigma_p * np.random.randn(n_stations)
-        self.t_obs_p = times_s + prior_model.sigma_s * np.random.randn(n_stations)
+        self.t_obs_s = times_s + prior_model.sigma_s * np.random.randn(n_stations)
 
     def get_times(self, station_positions, prior_model):
         # for both S and P waves
