@@ -1,20 +1,31 @@
 import numpy as np
 from forward_model import ForwardModel
+from inversion import Inversion
 from event import Event
 
 
-def setup_forward_model(t, n_stations=10):
+def setup_scene(n_stations=10):
     """
     t: array of periods
     """
     # Bounds of search (min, max)
-    x_bounds = [0, 94]
-    y_bounds = [0, 80]
+    bounds = {
+        "x": [0, 94],
+        "y": [0, 80],
+        "depth": [0, 35],
+        "t_origin": [0, 10],
+        "v_p": [3, 7],
+        "v_s": [2, 6],
+        "sigma_p": [0, 1],
+        "sigma_s": [0, 1],
+    }
+
+    # get bounds range
 
     # Station locations
     station_positions = {
-        "x": np.random.rand(n_stations) * (x_bounds[1] - x_bounds[0]),
-        "y": np.random.rand(n_stations) * (y_bounds[1] - y_bounds[0]),
+        "x": np.random.rand(n_stations) * (bounds["x"][1] - bounds["x"][0]),
+        "y": np.random.rand(n_stations) * (bounds["y"][1] - bounds["y"][0]),
         "z": np.zeros(n_stations),
     }
     # Events
@@ -39,7 +50,7 @@ def setup_forward_model(t, n_stations=10):
     )
     """
     # Initial velocity model
-    forward_model = ForwardModel(
+    prior_model = ForwardModel(
         vel_p=6.0,
         vel_s=3.47,
         sigma_p=0.05,
@@ -47,34 +58,37 @@ def setup_forward_model(t, n_stations=10):
         velocity_model=velocity_model,
     )
 
-    # use dispersion curve to set priors for the model
-    pd_rayleigh = forward_model.get_rayleigh_phase_dispersion(t)
-
     # Set t_obs for each event
     for event in events:
-        event.set_t_obs(n_stations, station_positions, forward_model)
+        event.set_t_obs(n_stations, station_positions, prior_model)
 
-    return forward_model
-
-
-def make_simulated_data():
-
-    forward_model = setup_forward_model()
-    forward_model.get_vel_s_profile(t)
-
-    # save to csv
+    return station_positions, events, prior_model, bounds
 
 
 def run():
-    pass
+    station_positions, events, prior_model, bounds = setup_scene()
+    inversion = Inversion(
+        station_positions,
+        events,
+        prior_model,
+        bounds,
+        n_chains=2,
+        n_burn=10000,
+        n_keep=2000,
+        n_rot=40000,
+    )
 
 
 def plot_results():
-    forward_model = setup_forward_model()
+    station_positions, events, prior_model, bounds = setup_scene()
 
     # plot vs. freq, wavelength, depth
     # plot of velocity model
     # plot ellipticity
-    pd_rayleigh = forward_model.get_rayleigh_phase_dispersion(t)
+    periods = np.linspace(0, 100, 100)
 
-    vel_s_profile = forward_model.get_vel_s_profile(t)
+    pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
+
+    vel_s_profile = prior_model.get_vel_s_profile(periods)
+
+    # make simulated data, save to csv

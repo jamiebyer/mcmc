@@ -17,6 +17,27 @@ class ForwardModel:
         self.sigma_p = sigma_p
         self.sigma_s = sigma_s
         self.velocity_model = velocity_model
+        self.covariance_matrix = None
+        self.params = [self.vel_p, self.vel_s, self.sigma_p, self.sigma_s]
+        self.n_params = len(self.params)
+        self.logL = None
+
+    def generate_random_model(self, prior_model, bounds, pcsd):
+        prior_params, n_params = prior_model.get_params()
+        self.vel_p, self.vel_s, self.sigma_p, self.sigma_s = (
+            prior_params + pcsd * np.random.randn(n_params)
+        )
+
+
+        # check bounds
+        for k, v in params:
+
+        if ((maxlim - new_params).min() > 0) and ((new_params - minlim).min() > 0):
+            # check pd conditions
+            pd_rayleigh = self.current_model.get_rayleigh_phase_dispersion(t)
+            if np.min(pd_rayleigh) < self.current_model.vel_s:
+                valid_model = True
+
 
     def get_rayleigh_phase_dispersion(self, t, mode=0):
         pd = PhaseDispersion(*self.velocity_model.T)
@@ -98,13 +119,73 @@ class ForwardModel:
                 maxpert=maxpert,
             )
 
-    def linrot(m, Nsta, Ndat, Ndatev, Npar, Nevent, xr, yr, zr, maxpert):
+    def get_derivatives(n_dm=50):
+        dm = np.zeros()
+        dm[0] = dm_start[ip]  # Estimate deriv for range of dm values
+        for i in range(NDM):
+            # print i,ip
+            mtry1 = m.copy()
+            mtry1[ip] = mtry1[ip] + dm[i]
+            # dat1 = get_times(m=mtry1,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
+            for iev in range(Nevent):
+                mtmp = np.append(mtry1[iev * 4 : (iev + 1) * 4], mtry1[-4:])
+                dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
+                ist = iev * Ndatev
+                iend = (iev + 1) * Ndatev
+                dat1[ist:iend] = dtmp
 
-        NDM = 50
+            mtry2 = m.copy()
+            mtry2[ip] = mtry2[ip] - dm[i]
+            # dat2 = get_times(m=mtry2,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
+            for iev in range(Nevent):
+                mtmp = np.append(mtry2[iev * 4 : (iev + 1) * 4], mtry2[-4:])
+                dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
+                ist = iev * Ndatev
+                iend = (iev + 1) * Ndatev
+                dat2[ist:iend] = dtmp
+
+            for j in range(ntot):
+                if np.abs((dat1[j] - dat2[j]) / (dat1[j] + dat2[j])) > 1.0e-7:
+                    dRdm[ip, j, i] = (dat1[j] - dat2[j]) / (2.0 * dm[i])
+                else:
+                    dRdm[ip, j, i] = 0.0
+            if i < NDM - 1:
+                dm[i + 1] = dm[i] / 1.5
+
+    def get_best_derivative():
+        for j in range(ntot):  # For each datum, choose best derivative estimate
+            best = 1.0e10
+            ibest = 1
+            for i in range(NDM - 2):
+                if (
+                    (np.abs(dRdm[ip, j, i + 0]) < 1.0e-7)
+                    or (np.abs(dRdm[ip, j, i + 1]) < 1.0e-7)
+                    or (np.abs(dRdm[ip, j, i + 2]) < 1.0e-7)
+                ):
+                    test = 1.0e20
+                else:
+                    test = np.abs(
+                        (
+                            dRdm[ip, j, i + 0] / dRdm[ip, j, i + 1]
+                            + dRdm[ip, j, i + 1] / dRdm[ip, j, i + 2]
+                        )
+                        / 2.0
+                        - 1.0
+                    )
+
+                if (test < best) and (test > 1.0e-7):
+                    best = test
+                    ibest = i + 1
+            Jac[j, ip] = dRdm[ip, j, ibest]  # Best deriv into Jacobian
+            if best > 1.0e10:
+                Jac[j, ip] = 0.0
+
+    def lin_rot(self, n_dm=50):
+        """
         ntot = Ndat
         dat1 = np.zeros(ntot)
         dat2 = np.zeros(ntot)
-        dRdm = np.zeros((Npar, ntot, NDM))
+        dRdm = np.zeros((Npar, ntot, n_dm))
         dm_start = np.zeros(Npar)
         Jac = np.zeros((ntot, Npar))
         JactCdinv = np.zeros((ntot, ntot))
@@ -115,69 +196,15 @@ class ForwardModel:
         V = np.zeros((Npar, Npar))
         L = np.zeros(Npar)
         pcsd = np.zeros(Npar)
+        """
 
         dm_start = m * 0.1
         sigma = m[-2:]
 
-        for ip in range(Npar):
-            dm = np.zeros(NDM)
-            dm[0] = dm_start[ip]  # Estimate deriv for range of dm values
-            for i in range(NDM):
-                # print i,ip
-                mtry1 = m.copy()
-                mtry1[ip] = mtry1[ip] + dm[i]
-                # dat1 = get_times(m=mtry1,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                for iev in range(Nevent):
-                    mtmp = np.append(mtry1[iev * 4 : (iev + 1) * 4], mtry1[-4:])
-                    dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
-                    ist = iev * Ndatev
-                    iend = (iev + 1) * Ndatev
-                    dat1[ist:iend] = dtmp
-
-                mtry2 = m.copy()
-                mtry2[ip] = mtry2[ip] - dm[i]
-                # dat2 = get_times(m=mtry2,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                for iev in range(Nevent):
-                    mtmp = np.append(mtry2[iev * 4 : (iev + 1) * 4], mtry2[-4:])
-                    dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
-                    ist = iev * Ndatev
-                    iend = (iev + 1) * Ndatev
-                    dat2[ist:iend] = dtmp
-
-                for j in range(ntot):
-                    if np.abs((dat1[j] - dat2[j]) / (dat1[j] + dat2[j])) > 1.0e-7:
-                        dRdm[ip, j, i] = (dat1[j] - dat2[j]) / (2.0 * dm[i])
-                    else:
-                        dRdm[ip, j, i] = 0.0
-                if i < NDM - 1:
-                    dm[i + 1] = dm[i] / 1.5
-
-            for j in range(ntot):  # For each datum, choose best derivative estimate
-                best = 1.0e10
-                ibest = 1
-                for i in range(NDM - 2):
-                    if (
-                        (np.abs(dRdm[ip, j, i + 0]) < 1.0e-7)
-                        or (np.abs(dRdm[ip, j, i + 1]) < 1.0e-7)
-                        or (np.abs(dRdm[ip, j, i + 2]) < 1.0e-7)
-                    ):
-                        test = 1.0e20
-                    else:
-                        test = np.abs(
-                            (
-                                dRdm[ip, j, i + 0] / dRdm[ip, j, i + 1]
-                                + dRdm[ip, j, i + 1] / dRdm[ip, j, i + 2]
-                            )
-                            / 2.0
-                            - 1.0
-                        )
-
-                    if (test < best) and (test > 1.0e-7):
-                        best = test
-                        ibest = i + 1
-                Jac[j, ip] = dRdm[ip, j, ibest]  # Best deriv into Jacobian
-                if best > 1.0e10:
-                    Jac[j, ip] = 0.0
+        for param in params:
+            # calculate n_loops derivatives
+            self.get_derivatives()
+            self.get_best_derivative
 
         for i in range(Npar):  # Scale columns of Jacobian for stability
             Jac[:, i] = Jac[:, i] * maxpert[i]
@@ -199,12 +226,37 @@ class ForwardModel:
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
         # pcsd = np.sqrt(L) # PC standard deviations
 
-        return (V, pcsd)
+    def update_likelihood(self, station_positions, events):
+        # P and S velocities for each event are all data
+        logL = 0
+        for event in events:
+            # calculate log(L) for each event
+            t_obs_p = event.t_obs_p
+            t_obs_s = event.t_obs_s
+
+            t_model_p, t_model_s = event.get_times(station_positions, self)
+
+            res_p = t_obs_p - t_model_p  # calculate p wave residual
+            res_s = t_obs_s - t_model_s  # calculate s wave residual
+
+            n_data_p = len(res_p)
+            n_data_s = len(res_s)
+
+            logL_p = -(1 / 2) * n_data_p * np.log(self.sigma_p)
+            -np.sum(res_p**2) / (2 * self.sigma_p ** 2)
+
+            logL_s = -(1 / 2) * n_data_s * np.log(self.sigma_s)
+            -np.sum(res_s**2) / (2 * self.sigma_s ** 2)
+
+            logL += logL_p + logL_s # check dimensions
+        self.logL = logL
+
 
     def perturb_params(self, scale_factor=1.3):
         # perturb each parameter in the model
-        params = [self.vel_p, self.vel_s, self.sigma_p, self.sigma_s]
+        params_og = [self.vel_p, self.vel_s, self.sigma_p, self.sigma_s]
         for ind in len(params):
+            # generate model
 
             ## Cauchy proposal:
             mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
@@ -221,22 +273,10 @@ class ForwardModel:
 
                 # calculate dtry from both Vp and Vs
                 # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                for iev in range(Nevent):
-                    mtmp = np.append(mtry[iev * 4 : (iev + 1) * 4], mtry[-4:])
-                    dtmp = lf.get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
-                    ist = iev * Ndatev
-                    iend = (iev + 1) * Ndatev
-                    dtry[ist:iend] = dtmp
-                    logLtmp[iev] = (
-                        -Ndatevp / 2.0 * np.log(mtry[-2])
-                        - np.sum((dobs[ist : ist + Nsta] - dtmp[0:Nsta]) ** 2)
-                        / (2.0 * mtry[-2] ** 2)
-                        - Ndatevs / 2.0 * np.log(mtry[-1])
-                        - np.sum((dobs[ist + Nsta : iend] - dtmp[Nsta:]) ** 2)
-                        / (2.0 * mtry[-1] ** 2)
-                    )
-                logLtry = np.sum(logLtmp)
-                #                logLtry = -Ndat/2.*np.log(mtry[-1])-np.sum((dobs-dtry)**2)/(2*mtry[-1]**2);
+                # ... mtry.calculate_likelihood
+                logL = self.calculate_likelihood(events)
+
+                logLtry = np.sum(logL)
 
                 # Compute likelihood ratio in log space:
                 dlogL = logLtry - logLcur[ichain]
