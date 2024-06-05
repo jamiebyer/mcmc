@@ -2,10 +2,11 @@ import numpy as np
 
 
 class Event:
-    def __init__(self, x, y, z, t_origin):
-        self.x = x
-        self.y = y
-        self.z = z
+    def __init__(self, lat, lon, depth, t_origin):
+        print("set lat ", lat)
+        self.lat = lat
+        self.lon = lon
+        self.depth = depth
         self.t_origin = t_origin
         self.t_obs_p = None
         self.t_obs_s = None
@@ -16,37 +17,40 @@ class Event:
         self.t_obs_p = times_p + prior_model.sigma_p * np.random.randn(n_stations)
         self.t_obs_s = times_s + prior_model.sigma_s * np.random.randn(n_stations)
 
-    def get_times(self, station_positions, prior_model):
+    def get_times(self, station_positions, forward_model):
         # for both S and P waves
         times_p = self.travel_time_3D(
-            x=self.x,
-            y=self.y,
-            z=self.z,
-            x_pos=station_positions["x"],
-            y_pos=station_positions["y"],
-            z_pos=station_positions["z"],
-            vel=prior_model.vel_p,
+            lat=self.lat,
+            lon=self.lon,
+            depth=self.depth,
+            lat_pos=station_positions["lat"],
+            lon_pos=station_positions["lon"],
+            depth_pos=station_positions["depth"],
+            vel=forward_model.vel_p,
             t_origin=self.t_origin,
         )
         times_s = self.travel_time_3D(
-            x=self.x,
-            y=self.y,
-            z=self.z,
-            x_pos=station_positions["x"],
-            y_pos=station_positions["y"],
-            z_pos=station_positions["z"],
-            vel=prior_model.vel_s,
+            lat=self.lat,
+            lon=self.lon,
+            depth=self.depth,
+            lat_pos=station_positions["lat"],
+            lon_pos=station_positions["lon"],
+            depth_pos=station_positions["depth"],
+            vel=forward_model.vel_s,
             t_origin=self.t_origin,
         )
         return times_p, times_s
 
-    def travel_time_3D(x, y, z, x_pos, y_pos, z_pos, vel, t_origin):
+    def travel_time_3D(lat, lon, depth, lat_pos, lon_pos, depth_pos, vel, t_origin):
         """
-        x_pos: Station x locations.
+        lat_pos: Station lat locations.
 
         """
         t = (
             t_origin
-            + np.sqrt((x_pos - x) ** 2 + (y_pos - y) ** 2 + (z_pos - z) ** 2) / vel
+            + np.sqrt(
+                (lat_pos - lat) ** 2 + (lon_pos - lon) ** 2 + (depth_pos - depth) ** 2
+            )
+            / vel
         )
         return t

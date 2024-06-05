@@ -2,6 +2,7 @@ import numpy as np
 from forward_model import ForwardModel
 from inversion import Inversion
 from event import Event
+import matplotlib.pyplot as plt
 
 
 def setup_scene(n_stations=10):
@@ -10,8 +11,8 @@ def setup_scene(n_stations=10):
     """
     # Bounds of search (min, max)
     bounds = {
-        "x": [0, 94],
-        "y": [0, 80],
+        "lat": [0, 94],
+        "lon": [0, 80],
         "depth": [0, 35],
         "t_origin": [0, 10],
         "v_p": [3, 7],
@@ -24,17 +25,22 @@ def setup_scene(n_stations=10):
 
     # Station locations
     station_positions = {
-        "x": np.random.rand(n_stations) * (bounds["x"][1] - bounds["x"][0]),
-        "y": np.random.rand(n_stations) * (bounds["y"][1] - bounds["y"][0]),
-        "z": np.zeros(n_stations),
+        "lat": np.random.rand(n_stations) * (bounds["lat"][1] - bounds["lat"][0]),
+        "lon": np.random.rand(n_stations) * (bounds["lon"][1] - bounds["lon"][0]),
+        "depth": np.zeros(n_stations),
     }
     # Events
+    """
     events = [
         Event(lat=60.0, lon=35.0, depth=10.0, t_origin=1.0),
         Event(lat=70.0, lon=40.0, depth=15.0, t_origin=2.0),
     ]
-
     """
+    events = [
+        Event(lat=60, lon=35, depth=10, t_origin=1),
+        Event(lat=70, lon=40, depth=15, t_origin=2),
+    ]
+
     velocity_model = np.array(
         [
             [10.0, 7.00, 3.50, 2.00],
@@ -48,7 +54,7 @@ def setup_scene(n_stations=10):
             [10.0, 9.50, 4.75, 2.00],
         ]
     )
-    """
+
     # Initial velocity model
     prior_model = ForwardModel(
         vel_p=6.0,
@@ -85,10 +91,29 @@ def plot_results():
     # plot vs. freq, wavelength, depth
     # plot of velocity model
     # plot ellipticity
-    periods = np.linspace(0, 100, 100)
+    periods = np.linspace(0, 100, 100)  # unit
 
     pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
+
+    plot_depth(periods, pd_rayleigh.velocity)
 
     vel_s_profile = prior_model.get_vel_s_profile(periods)
 
     # make simulated data, save to csv
+
+
+def plot_model_setup():
+    # plot velocity_model
+    pass
+
+
+def plot_depth(periods, vel):
+    freq = 1 / periods
+
+    wavelengths = vel / freq
+
+    plt.plot(freq, wavelengths)
+    plt.show
+
+
+plot_results()

@@ -27,11 +27,9 @@ class Inversion:
         self.logL = np.zeros(n_chains)
 
         # make vector form of bounds
-        self.bounds = bounds
+        self.bounds = list(bounds.values())  # should maintain order
 
     def run_inversion(self):
-        # for event in self.events:
-        #    event.set_t_obs()
         # setup starting models
         self.initialize_chains(pcsd)
         # linrot
@@ -43,48 +41,10 @@ class Inversion:
             valid_model = False
             while not valid_model:
                 # adding random normal noise to the true model for the starting model
-                chain_model.generate_random_model(self.prior_model, self.bounds, pcsd)
+                chain_model.generate_starting_model(self.prior_model, self.bounds, pcsd)
                 if chain_model is not None:
                     valid_model = True
             chain_model.update_likelihood(self.stations, self.events)
-
-    def generate_model(self, u, pcsd):
-        ## Cauchy proposal:
-        mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
-            np.pi * (np.random.rand(1)[0] - 0.5)
-        )
-        ## Gaussian proposal
-        #            mtry[ipar] = mtry[ipar]+ 1.1*pcsd[ipar,ichain]*np.random.randn(1)
-        mtry = np.matmul(u[:, :, ichain], mtry)
-        # unnormalize
-        mtry = minlim + (mtry * maxpert)
-
-        if ((maxlim - mtry).min() > 0) and (
-            (mtry - minlim).min() > 0
-        ):  # Check that mtry is inside unifrom prior:
-            return mtry
-
-        return None
-
-    def perturb_params():
-        for ind in len(params):
-            # generate model
-            mtry = self.generate_model()
-            if mtry is not None:
-                # calculate dtry from both Vp and Vs
-                # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                logL = mtry.calculate_likelihood(events)
-
-                logLtry = np.sum(logL)
-
-                # Compute likelihood ratio in log space:
-                dlogL = logLtry - logLcur[ichain]
-                xi = np.random.rand(1)
-                # Apply MH criterion (accept/reject)
-                if xi <= np.exp(dlogL):
-                    logLcur[ichain] = logLtry
-                    mcur[:, ichain] = mtry
-                    dcur[:, ichain] = dtry
 
     def calculate_covariance_matrix(covariance_matrix, rotation: bool):
         # if (c_new[ichain] == 2) & (icount[ichain] == 0):
@@ -127,13 +87,13 @@ class Inversion:
             if c_diff < cconv:
                 rotation = True
 
-            for chain in range(self.nmcmc):
+            for chain_model in self.chains:
                 # normalizing
                 mtry = (mcur[:, ichain] - minlim) / maxpert
                 mtry = np.matmul(np.transpose(u[:, :, ichain]), mtry)  # with rotation
 
                 # perturb each parameter in the model
-                mtry.perturb_params()
+                chain_model.perturb_params()
                 """
                 if (icount[ichain] > NKEEP) & (
                     c_new[ichain] >= 1

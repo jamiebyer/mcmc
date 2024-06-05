@@ -1,4 +1,4 @@
-from numpy import np
+import numpy as np
 from disba import PhaseDispersion
 
 
@@ -22,22 +22,67 @@ class ForwardModel:
         self.n_params = len(self.params)
         self.logL = None
 
-    def generate_random_model(self, prior_model, bounds, pcsd):
-        prior_params, n_params = prior_model.get_params()
-        self.vel_p, self.vel_s, self.sigma_p, self.sigma_s = (
-            prior_params + pcsd * np.random.randn(n_params)
-        )
+    def generate_starting_model(self, prior_model, bounds, pcsd, periods):
+        prior_params = prior_model.params
+        n_params = len(prior_params)
+        new_params = []
+        valid_model = False
+        while not valid_model:
+            new_params = prior_params + pcsd * np.random.randn(n_params)
+            valid_model = True
+            # check bounds
+            for ind in range(n_params):
+                if (bounds[ind][0] > new_params[ind]) or (
+                    bounds[ind][1] < new_params[ind]
+                ):
+                    valid_model = False
+                    break
 
-
-        # check bounds
-        for k, v in params:
-
-        if ((maxlim - new_params).min() > 0) and ((new_params - minlim).min() > 0):
-            # check pd conditions
-            pd_rayleigh = self.current_model.get_rayleigh_phase_dispersion(t)
+            # pd_rayleigh constraint
+            pd_rayleigh = self.current_model.get_rayleigh_phase_dispersion(periods)
             if np.min(pd_rayleigh) < self.current_model.vel_s:
-                valid_model = True
+                valid_model = False
 
+        self.vel_p, self.vel_s, self.sigma_p, self.sigma_s = new_params
+
+    def generate_perturbed_model(self, u, pcsd):
+        ## Cauchy proposal:
+        """
+        mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
+            np.pi * (np.random.rand(1)[0] - 0.5)
+        )
+        ## Gaussian proposal
+        #            mtry[ipar] = mtry[ipar]+ 1.1*pcsd[ipar,ichain]*np.random.randn(1)
+        mtry = np.matmul(u[:, :, ichain], mtry)
+        # unnormalize
+        mtry = minlim + (mtry * maxpert)
+        """
+        # check bouncs
+
+        # return model
+
+        return None
+
+    def perturb_params(self):
+
+        for param in len(self.params):
+            # generate model
+            model = self.generate_model()
+            if mtry is not None:
+                # calculate dtry from both Vp and Vs
+                # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
+                logL = mtry.calculate_likelihood(events)
+
+                logLtry = np.sum(logL)
+
+                # Compute likelihood ratio in log space:
+                dlogL = logLtry - logLcur[ichain]
+                xi = np.random.rand(1)
+                # Apply MH criterion (accept/reject)
+                if xi <= np.exp(dlogL):
+                    logLcur[ichain] = logLtry
+                    mcur[:, ichain] = mtry
+                    dcur[:, ichain] = dtry
 
     def get_rayleigh_phase_dispersion(self, t, mode=0):
         pd = PhaseDispersion(*self.velocity_model.T)
@@ -226,9 +271,13 @@ class ForwardModel:
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
         # pcsd = np.sqrt(L) # PC standard deviations
 
-    def update_likelihood(self, station_positions, events):
-        # P and S velocities for each event are all data
-        logL = 0
+    def update_likelihood(self, station_positions, events, param_ind=None, param=None):
+        if param is not None:
+            params_og = self.params[param_ind]
+            logL_og = self.logL
+            self.params[param_ind] = param
+
+        logL_new = 0
         for event in events:
             # calculate log(L) for each event
             t_obs_p = event.t_obs_p
@@ -243,20 +292,28 @@ class ForwardModel:
             n_data_s = len(res_s)
 
             logL_p = -(1 / 2) * n_data_p * np.log(self.sigma_p)
-            -np.sum(res_p**2) / (2 * self.sigma_p ** 2)
+            -np.sum(res_p**2) / (2 * self.sigma_p**2)
 
             logL_s = -(1 / 2) * n_data_s * np.log(self.sigma_s)
-            -np.sum(res_s**2) / (2 * self.sigma_s ** 2)
+            -np.sum(res_s**2) / (2 * self.sigma_s**2)
 
-            logL += logL_p + logL_s # check dimensions
-        self.logL = logL
+            logL_new += logL_p + logL_s  # check dimensions
 
+        if param is not None and logL_og > logL_new:  ##### CHECK
+            self.params = params_og
+        else:
+            self.logL = logL_new
 
-    def perturb_params(self, scale_factor=1.3):
+    def perturb_params(self, station_positions, events, scale_factor=1.3):
         # perturb each parameter in the model
-        params_og = [self.vel_p, self.vel_s, self.sigma_p, self.sigma_s]
+        params = self.params
         for ind in len(params):
+            # new perturbed model param
+
             # generate model
+            self.update_likelihood(
+                station_positions, events, param_ind=ind, param=params[ind]
+            )
 
             ## Cauchy proposal:
             mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
