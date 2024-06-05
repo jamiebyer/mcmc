@@ -6,9 +6,7 @@ import matplotlib.pyplot as plt
 
 
 def setup_scene(n_stations=10):
-    """
-    t: array of periods
-    """
+    """ """
     # Bounds of search (min, max)
     bounds = {
         "lat": [0, 94],
@@ -36,6 +34,7 @@ def setup_scene(n_stations=10):
         Event(lat=70.0, lon=40.0, depth=15.0, t_origin=2.0),
     ]
     """
+
     events = [
         Event(lat=60, lon=35, depth=10, t_origin=1),
         Event(lat=70, lon=40, depth=15, t_origin=2),
@@ -86,12 +85,13 @@ def run():
 
 
 def plot_results():
+    # double check units
     station_positions, events, prior_model, bounds = setup_scene()
 
     # plot vs. freq, wavelength, depth
     # plot of velocity model
     # plot ellipticity
-    periods = np.linspace(0, 100, 100)  # unit
+    periods = np.linspace(1, 100, 100)  # unit
 
     pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
 
@@ -107,13 +107,26 @@ def plot_model_setup():
     pass
 
 
+def plot_velocity():
+    pass
+
+
 def plot_depth(periods, vel):
     freq = 1 / periods
 
     wavelengths = vel / freq
 
-    plt.plot(freq, wavelengths)
-    plt.show
+    plt.subplot(2, 1, 1)
+    plt.scatter(freq, wavelengths)
+    plt.xlabel("frequency")
+    plt.ylabel("wavelength")
+
+    plt.subplot(2, 1, 2)
+    plt.scatter(periods, wavelengths)
+    plt.xlabel("period")
+    plt.ylabel("wavelength")
+
+    plt.show()
 
 
 plot_results()

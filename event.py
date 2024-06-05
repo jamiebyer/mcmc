@@ -3,7 +3,6 @@ import numpy as np
 
 class Event:
     def __init__(self, lat, lon, depth, t_origin):
-        print("set lat ", lat)
         self.lat = lat
         self.lon = lon
         self.depth = depth
@@ -19,7 +18,7 @@ class Event:
 
     def get_times(self, station_positions, forward_model):
         # for both S and P waves
-        times_p = self.travel_time_3D(
+        times_p = Event.travel_time_3D(
             lat=self.lat,
             lon=self.lon,
             depth=self.depth,
@@ -41,6 +40,7 @@ class Event:
         )
         return times_p, times_s
 
+    @staticmethod
     def travel_time_3D(lat, lon, depth, lat_pos, lon_pos, depth_pos, vel, t_origin):
         """
         lat_pos: Station lat locations.

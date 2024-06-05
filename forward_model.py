@@ -39,8 +39,8 @@ class ForwardModel:
                     break
 
             # pd_rayleigh constraint
-            pd_rayleigh = self.current_model.get_rayleigh_phase_dispersion(periods)
-            if np.min(pd_rayleigh) < self.current_model.vel_s:
+            pd_rayleigh = self.get_rayleigh_phase_dispersion(periods)
+            if np.min(pd_rayleigh) < self.vel_s:
                 valid_model = False
 
         self.vel_p, self.vel_s, self.sigma_p, self.sigma_s = new_params
