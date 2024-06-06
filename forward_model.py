@@ -135,7 +135,7 @@ class ForwardModel:
             vel_s.append(new_vel)
             total_avg += new_vel
 
-        return vel_s
+        return depths, vel_s
 
     def lin_rot():
         if ilinrot:

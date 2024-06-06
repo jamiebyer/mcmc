@@ -30,6 +30,14 @@ class Inversion:
         self.bounds = list(bounds.values())  # should maintain order
 
     def run_inversion(self):
+        """
+        Solving for:
+        - thickness of each layer
+        - birch parameters for density profile
+        - vs and vp of each layer
+        - sigma s and sigma p?
+        """
+
         # setup starting models
         self.initialize_chains(pcsd)
         # linrot
