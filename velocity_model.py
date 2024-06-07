@@ -1,51 +1,103 @@
 import numpy as np
 from disba import PhaseDispersion
+import pandas as pd
+from scipy import interpolate
 
 
-class ForwardModel:
-    def __init__(self, vel_p, vel_s, sigma_p, sigma_s, velocity_model):
-        """
-        vel_p: P wave velocities.
-        vel_s: S wave velocities.
-        sigma_p: P wave velocity uncertainties.
-        sigma_s: S wave velocity uncertainties.
-        velocity_model: [[thickness (km), Vp (km/s), Vs(km/s), density(g/cm3)]]
-
-        """
+class VelocityModel:
+    def __init__(self, thickness, vel_p, vel_s, sigma_rayleigh, density_params):
+        self.thickness = thickness
         self.vel_p = vel_p
         self.vel_s = vel_s
-        self.sigma_p = sigma_p
-        self.sigma_s = sigma_s
-        self.velocity_model = velocity_model
-        self.covariance_matrix = None
-        self.params = [self.vel_p, self.vel_s, self.sigma_p, self.sigma_s]
-        self.n_params = len(self.params)
-        self.logL = None
+        self.sigma_rayleigh = sigma_rayleigh
 
-    def generate_starting_model(self, prior_model, bounds, pcsd, periods):
-        prior_params = prior_model.params
-        n_params = len(prior_params)
-        new_params = []
-        valid_model = False
-        while not valid_model:
-            new_params = prior_params + pcsd * np.random.randn(n_params)
-            valid_model = True
-            # check bounds
-            for ind in range(n_params):
-                if (bounds[ind][0] > new_params[ind]) or (
-                    bounds[ind][1] < new_params[ind]
-                ):
-                    valid_model = False
-                    break
+        self.density = (vel_p - density_params[0]) / density_params[1]
 
-            # pd_rayleigh constraint
-            pd_rayleigh = self.get_rayleigh_phase_dispersion(periods)
-            if np.min(pd_rayleigh) < self.vel_s:
-                valid_model = False
+        self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
+        # self.vel_rayleigh = None
 
-        self.vel_p, self.vel_s, self.sigma_p, self.sigma_s = new_params
+        # self.pcsd = 1 / 20
+        # self.u = np.eye(n_params)
+
+    def forward_model(self):
+        """
+        Get phase dispersion curve from shear velocities.
+        """
+        pd = PhaseDispersion(*self.velocity_model)
+        pd_rayleigh = pd(self.periods, mode=0, wave="rayleigh")
+        # ell = Ellipticity(*velocity_model.T)
+
+        return pd_rayleigh
+
+    def get_density(vel_p, a, b):
+        # Birch's law
+        density = (vel_p - a) / b
+        return density
+
+    def get_vel_s_profile(self, freq, vel_rayleigh):
+        # get wavelength from frequency
+        wavelength_rayleigh = vel_rayleigh / freq  # CHECK UNITS
+
+        # get depth from wavelength
+        depths = wavelength_rayleigh
+
+        # get vel_s depth profile
+        vel_s = [vel_rayleigh[0]]
+        vel_s_avgs = [vel_rayleigh[0]]
+        total_avg = vel_rayleigh[0]
+
+        for i in range(1, len(vel_rayleigh)):
+            new_vel = (vel_rayleigh[i] - total_avg) / depths[
+                i
+            ]  # CHECK IF DEPTHS ARE ORDERED
+            vel_s.append(new_vel)
+            total_avg += new_vel
+
+        return depths, vel_s
+
+    def generate_true_model(n_layers, layer_bounds):
+        # from PREM...
+        prem = pd.read_csv("./PREM500_IDV.csv")
+
+        # generate layer thicknesses
+        thickness = np.random.uniform(layer_bounds[0], layer_bounds[1], n_layers)
+        depth = np.cumsum(thickness)
+        radius = prem["radius"] / 1000  # convert m to km
+
+        # interpolate density
+        # prolly want the avg of each layer or something
+        prem_density = prem["density"]  # kg/m^3
+
+        density_func = interpolate.interp1d(radius, prem_density)
+        density = density_func(depth)
+
+        # get initial vs
+        prem_vs = prem["Vsh"]  # m/s
+        vs_func = interpolate.interp1d(radius, prem_vs)
+        vs = vs_func(depth)
+
+        # get initial vp
+
+        # assemble velocity model
+
+    def generate_starting_model(true_model, pcsd, n_params):
+        # maybe there's another way to generate starting model
+        starting_model = true_model.copy().velocity_model + pcsd * np.random.randn(
+            n_params
+        )
+
+        # validate, check bounds
+        # calculate likelihood
+        # chain_model.logL = chain_model.update_likelihood(self.stations, self.events)
+        return starting_model
 
     def generate_perturbed_model(self, u, pcsd):
+        """
+        Generate a model -----
+        Loop over each parameter, perturb it.
+        Keep the parameters with the best likelihood.
+        """
+
         ## Cauchy proposal:
         """
         mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
@@ -63,15 +115,45 @@ class ForwardModel:
 
         return None
 
-    def perturb_params(self):
+    def perturb_model():
+        pass
 
-        for param in len(self.params):
+    def perturb_params(self, station_positions, events, u, pcsd, scale_factor=1.3):
+        # self is current best model
+        current_params = self.params
+
+        # normalizing, rotating to be in PC space
+        test_params = (current_params - minlim) / maxpert
+        test_params = np.matmul(np.transpose(u), test_params)
+
+        # generate params to try
+        # Cauchy proposal
+        test_params += (
+            scale_factor * self.pcsd * np.tan(np.pi * (np.random.rand(4) - 0.5))
+        )
+
+        # back to paramater space
+        mtry = np.matmul(u[:, :, ichain], mtry)
+        mtry = minlim + (mtry * maxpert)
+
+        # perturb each parameter in the model
+
+        for ind in len(params):
+            # new perturbed model param
+
             # generate model
-            model = self.generate_model()
-            if mtry is not None:
+            self.update_likelihood(
+                station_positions, events, param_ind=ind, param=params[ind]
+            )
+
+            if ((maxlim - mtry).min() > 0) and (
+                (mtry - minlim).min() > 0
+            ):  # Check that mtry is inside unifrom prior:
+
                 # calculate dtry from both Vp and Vs
                 # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                logL = mtry.calculate_likelihood(events)
+                # ... mtry.calculate_likelihood
+                logL = self.calculate_likelihood(events)
 
                 logLtry = np.sum(logL)
 
@@ -83,59 +165,6 @@ class ForwardModel:
                     logLcur[ichain] = logLtry
                     mcur[:, ichain] = mtry
                     dcur[:, ichain] = dtry
-
-    def get_rayleigh_phase_dispersion(self, t, mode=0):
-        pd = PhaseDispersion(*self.velocity_model.T)
-        pd_rayleigh = pd(t, mode=mode, wave="rayleigh")
-        # ell = Ellipticity(*velocity_model.T)
-        return pd_rayleigh
-
-    def get_vel_s_profile(self, t):
-        """
-        t: array of periods
-        """
-        # make velocity model
-        """
-        # thickness, Vp, Vs, density
-        # km, km/s, km/s, g/cm3
-        velocity_model = np.array(
-                [
-                    [10.0, 7.00, 3.50, 2.00],
-                    [10.0, 6.80, 3.40, 2.00],
-                    [10.0, 7.00, 3.50, 2.00],
-                    [10.0, 7.60, 3.80, 2.00],
-                    [10.0, 8.40, 4.20, 2.00],
-                    [10.0, 9.00, 4.50, 2.00],
-                    [10.0, 9.40, 4.70, 2.00],
-                    [10.0, 9.60, 4.80, 2.00],
-                    [10.0, 9.50, 4.75, 2.00],
-                ]
-            )
-        """
-
-        pd_rayleigh = self.get_rayleigh_phase_dispersion(t)
-
-        freq_rayleigh = pd_rayleigh.velocity
-        vel_rayleigh = pd_rayleigh.velocity
-
-        # get wavelength from frequency
-        wavelength_rayleigh = vel_rayleigh / freq_rayleigh  # CHECK UNITS
-
-        # get depth from wavelength
-        depths = wavelength_rayleigh
-
-        # get vel_s depth profile
-        vel_s = [vel_rayleigh[0]]
-        vel_s_avgs = [vel_rayleigh[0]]
-        total_avg = vel_rayleigh[0]
-        for i in range(1, len(vel_rayleigh)):
-            new_vel = (vel_rayleigh[i] - total_avg) / depths[
-                i
-            ]  # CHECK IF DEPTHS ARE ORDERED
-            vel_s.append(new_vel)
-            total_avg += new_vel
-
-        return depths, vel_s
 
     def lin_rot():
         if ilinrot:
@@ -271,19 +300,21 @@ class ForwardModel:
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
         # pcsd = np.sqrt(L) # PC standard deviations
 
-    def update_likelihood(self, station_positions, events, param_ind=None, param=None):
-        if param is not None:
-            params_og = self.params[param_ind]
-            logL_og = self.logL
-            self.params[param_ind] = param
+    def validate_params(params, bounds):
+        # check the total thickness of the model
+        # check that shear velocity fits the phase dispersion requirements
 
+        pass
+
+    def update_likelihood(self, params, station_positions, events):
+        """ """
         logL_new = 0
         for event in events:
             # calculate log(L) for each event
             t_obs_p = event.t_obs_p
             t_obs_s = event.t_obs_s
 
-            t_model_p, t_model_s = event.get_times(station_positions, self)
+            t_model_p, t_model_s = event.get_times(station_positions, params)
 
             res_p = t_obs_p - t_model_p  # calculate p wave residual
             res_s = t_obs_s - t_model_s  # calculate s wave residual
@@ -299,47 +330,4 @@ class ForwardModel:
 
             logL_new += logL_p + logL_s  # check dimensions
 
-        if param is not None and logL_og > logL_new:  ##### CHECK
-            self.params = params_og
-        else:
-            self.logL = logL_new
-
-    def perturb_params(self, station_positions, events, scale_factor=1.3):
-        # perturb each parameter in the model
-        params = self.params
-        for ind in len(params):
-            # new perturbed model param
-
-            # generate model
-            self.update_likelihood(
-                station_positions, events, param_ind=ind, param=params[ind]
-            )
-
-            ## Cauchy proposal:
-            mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
-                np.pi * (np.random.rand(1)[0] - 0.5)
-            )
-            ## Gaussian proposal
-            #            mtry[ipar] = mtry[ipar]+ 1.1*pcsd[ipar,ichain]*np.random.randn(1)
-            mtry = np.matmul(u[:, :, ichain], mtry)
-            mtry = minlim + (mtry * maxpert)
-
-            if ((maxlim - mtry).min() > 0) and (
-                (mtry - minlim).min() > 0
-            ):  # Check that mtry is inside unifrom prior:
-
-                # calculate dtry from both Vp and Vs
-                # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                # ... mtry.calculate_likelihood
-                logL = self.calculate_likelihood(events)
-
-                logLtry = np.sum(logL)
-
-                # Compute likelihood ratio in log space:
-                dlogL = logLtry - logLcur[ichain]
-                xi = np.random.rand(1)
-                # Apply MH criterion (accept/reject)
-                if xi <= np.exp(dlogL):
-                    logLcur[ichain] = logLtry
-                    mcur[:, ichain] = mtry
-                    dcur[:, ichain] = dtry
+            return logL_new

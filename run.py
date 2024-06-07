@@ -1,100 +1,47 @@
 import numpy as np
-from forward_model import ForwardModel
 from inversion import Inversion
 from event import Event
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
+from velocity_model import generate_true_model, generate_starting_model
 
 
-def get_initial_density(thickness):
-    """
-    Get initial densities from PREM csv.
-
-    :param thickness: thickness of each layer, descending. (km)
-
-    :return: densities for each layer. (g/cm3)
-    """
-    prem = pd.read_csv("./PREM500_IDV.csv")
-    density = prem["density"]  # kg/m^3
-    radius = prem["radius"] / 1000  # convert m to km
-
-    depth = np.cumsum(thickness)
-
-    x = np.arange(0, 10)
-    y = np.exp(-x / 3.0)
-    density_func = interpolate.interp1d(radius, density)
-    density = density_func(depth)
-
-    # VP = a + rho b # Birch
-
-    return density  # g/cm3
-
-
-def setup_scene(n_stations=10):
+def setup_scene(n_layers=10, poisson_ratio=0.265, density_params=None, pcsd=1 / 20):
     """
     Define bounds, station positions...
     """
 
     # Bounds of search (min, max)
+    # density bounds
     bounds = {
-        "lat": [0, 94],
-        "lon": [0, 80],
-        "depth": [0, 35],
-        "t_origin": [0, 10],
+        "layer_thickness": [0, 10],
         "v_p": [3, 7],
         "v_s": [2, 6],
         "sigma_p": [0, 1],
         "sigma_s": [0, 1],
     }
-
-    # Station locations
-    station_positions = {
-        "lat": np.random.rand(n_stations) * (bounds["lat"][1] - bounds["lat"][0]),
-        "lon": np.random.rand(n_stations) * (bounds["lon"][1] - bounds["lon"][0]),
-        "depth": np.zeros(n_stations),
-    }
-    # Events
-    events = [
-        Event(lat=60, lon=35, depth=10, t_origin=1),
-        Event(lat=70, lon=40, depth=15, t_origin=2),
-    ]
-
-    velocity_model = {
-        "thickness": [10, 10, 10, 10, 10, 10, 10, 10, 10],  # km
-        # "density": [2, 2, 2, 2, 2, 2, 2, 2, 2], # g/cm3
-        "vel_p": [7.0, 6.8, 7.0, 7.6, 8.4, 9.0, 9.4, 9.6, 9.5],  # km/s
-        "vel_s": [3.5, 3.4, 3.5, 3.8, 4.2, 4.5, 4.7, 4.8, 4.75],  # km/s
-        "sigma_p": 0.05,
-        "sigma_s": 0.3,
-    }
-
-    velocity_model["density"] = get_initial_density(thickness)
-
     # Initial velocity model
-    prior_model = ForwardModel(**velocity_model)
+    true_model = generate_true_model(n_layers, bounds["layer_thickness"])
+    pd_rayleigh = true_model.forward_model()
+    avg_vs_obs = pd_rayleigh.velocity + sigma_pd * np.random.randn(n_layers)
 
-    # Set t_obs for each event
-    for event in events:
-        event.set_t_obs(n_stations, station_positions, prior_model)
+    starting_model = generate_starting_model(true_model, pcsd, n_layers)
 
-    return station_positions, events, prior_model, bounds
+    return avg_vs_obs, starting_model, bounds, n_layers
 
 
 def run():
     """
     Run inversion.
     """
-    station_positions, events, prior_model, bounds = setup_scene()
+    avg_vs_obs, starting_model, bounds, n_layers = setup_scene()
     inversion = Inversion(
-        station_positions,
-        events,
-        prior_model,
+        avg_vs_obs,
+        starting_model,
         bounds,
+        n_layers,
         n_chains=2,
-        n_burn=10000,
-        n_keep=2000,
-        n_rot=40000,
     )
     resulting_model = inversion.run_inversion()
 
@@ -104,6 +51,7 @@ def plot_results():
     # add units
     # plot ellipticity
     # save figures directly to folder
+    # plot density
 
     station_positions, events, prior_model, bounds = setup_scene()
     periods = np.linspace(1, 100, 100)  # unit

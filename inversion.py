@@ -4,26 +4,30 @@ import numpy as np
 class Inversion:
     def __init__(
         self,
-        station_positions,
-        events,
-        prior_model,
+        avg_vs_obs,
+        starting_model,
         bounds,
+        n_layers,
         n_chains=2,
         n_burn=10000,  # index for burning
         n_keep=2000,  # index for writing it down
-        n_rot=40000,  # Do at least n_rot steps after nonlinear rotation started
+        n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
     ):
+        # TODO:
+        # add in burning, keeping, rotation indices.
         """ """
-        self.station_positions = station_positions
-        self.events = events
-        self.prior_model = prior_model
+        self.avg_vs_obs = avg_vs_obs
+        self.bounds = bounds
+
+        self.n_layers = n_layers
         self.n_chains = n_chains
+
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of random walks
 
-        self.chains = np.fill(n_chains, prior_model)
+        self.chains = np.fill(n_chains, starting_model)
         self.logL = np.zeros(n_chains)
 
         # make vector form of bounds
@@ -33,30 +37,16 @@ class Inversion:
         """
         Solving for:
         - thickness of each layer
-        - birch parameters for density profile
-        - vs and vp of each layer
-        - sigma s and sigma p?
+        - vs of each layer
+        - vp/vs ?
+        - sigma s and sigma p ?
         """
-
-        # setup starting models
-        self.initialize_chains(pcsd)
         # linrot
-        # mcmc random walk
 
-    def initialize_chains(self, pcsd):
-        for chain_model in self.chains:
-            # generate a model that fits the priors
-            valid_model = False
-            while not valid_model:
-                # adding random normal noise to the true model for the starting model
-                chain_model.generate_starting_model(self.prior_model, self.bounds, pcsd)
-                if chain_model is not None:
-                    valid_model = True
-            chain_model.update_likelihood(self.stations, self.events)
+        # mcmc random walk
+        self.random_walk()
 
     def calculate_covariance_matrix(covariance_matrix, rotation: bool):
-        # if (c_new[ichain] == 2) & (icount[ichain] == 0):
-
         # normalizing
         mw = (mcur[:, ichain] - minlim) / maxpert
         ncov[ichain] += 1
@@ -81,9 +71,11 @@ class Inversion:
             )  # rotate it to its Singular Value Decomposition
             pcsd[:, ichain] = np.sqrt(s)
 
-    def random_walk():
+    def random_walk(self):
         # initialize correlation matrix, 3 dimmensions with Nchain
-        correlation_mat = np.zeros((Npar, Npar, Nchain), dtype=float)
+        correlation_mat = np.zeros(
+            (self.n_layers, self.n_layers, self.n_chains), dtype=float
+        )
         correlation_mat[:, :, 1] += 1
 
         for i in range(self.n_mcmc):
@@ -96,11 +88,7 @@ class Inversion:
                 rotation = True
 
             for chain_model in self.chains:
-                # normalizing
-                mtry = (mcur[:, ichain] - minlim) / maxpert
-                mtry = np.matmul(np.transpose(u[:, :, ichain]), mtry)  # with rotation
 
-                # perturb each parameter in the model
                 chain_model.perturb_params()
                 """
                 if (icount[ichain] > NKEEP) & (
