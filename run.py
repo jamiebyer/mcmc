@@ -6,6 +6,12 @@ import pandas as pd
 from scipy import interpolate
 from velocity_model import generate_true_model, generate_starting_model
 
+# TODO:
+# - add environment
+# - readme
+# - figures folder
+# - add tests
+
 
 def setup_scene(n_layers=10, poisson_ratio=0.265, density_params=None, pcsd=1 / 20):
     """
@@ -22,7 +28,12 @@ def setup_scene(n_layers=10, poisson_ratio=0.265, density_params=None, pcsd=1 / 
         "sigma_s": [0, 1],
     }
     # Initial velocity model
-    true_model = generate_true_model(n_layers, bounds["layer_thickness"])
+    true_model = generate_true_model(
+        n_layers,
+        bounds["layer_thickness"],
+        poisson_ratio,
+    )
+
     pd_rayleigh = true_model.forward_model()
     avg_vs_obs = pd_rayleigh.velocity + sigma_pd * np.random.randn(n_layers)
 

@@ -29,9 +29,9 @@ class VelocityModel:
 
         return pd_rayleigh
 
-    def get_density(vel_p, a, b):
+    def get_density(vel_p, density_params):
         # Birch's law
-        density = (vel_p - a) / b
+        density = (vel_p - density_params[0]) / density_params[1]
         return density
 
     def get_vel_s_profile(self, freq, vel_rayleigh):
@@ -55,32 +55,41 @@ class VelocityModel:
 
         return depths, vel_s
 
-    def generate_true_model(n_layers, layer_bounds):
+    def generate_true_model(n_layers, layer_bounds, poisson_ratio):
         # from PREM...
         prem = pd.read_csv("./PREM500_IDV.csv")
 
         # generate layer thicknesses
-        thickness = np.random.uniform(layer_bounds[0], layer_bounds[1], n_layers)
+        thickness = np.random.uniform(layer_bounds[0], layer_bounds[1], n_layers) # change to gaussian
         depth = np.cumsum(thickness)
         radius = prem["radius"] / 1000  # convert m to km
 
         # interpolate density
         # prolly want the avg of each layer or something
         prem_density = prem["density"]  # kg/m^3
-
         density_func = interpolate.interp1d(radius, prem_density)
         density = density_func(depth)
 
         # get initial vs
-        prem_vs = prem["Vsh"]  # m/s
+        prem_vs = prem["Vsh"]/1000  # convert m/s to km/s
         vs_func = interpolate.interp1d(radius, prem_vs)
         vs = vs_func(depth)
 
         # get initial vp
+        vp_vs = np.sqrt((2-2*poisson_ratio)/(1-2*poisson_ratio))
+        vp = vs * vp_vs
+
+        # or since it's the true model, use prem vp
 
         # assemble velocity model
+        velocity_model = [thickness, vp, vs, density]
+        return velocity_model
 
-    def generate_starting_model(true_model, pcsd, n_params):
+    def validate_params(params, bounds):
+        return np.all(params >= bounds[0, :]) and np.all(params <= bounds[1, :])
+
+
+    def generate_starting_model(true_model, n_params, pcsd=0.05):
         # maybe there's another way to generate starting model
         starting_model = true_model.copy().velocity_model + pcsd * np.random.randn(
             n_params
@@ -88,110 +97,62 @@ class VelocityModel:
 
         # validate, check bounds
         # calculate likelihood
-        # chain_model.logL = chain_model.update_likelihood(self.stations, self.events)
+        starting_model.update_likelihood()
         return starting_model
 
-    def generate_perturbed_model(self, u, pcsd):
+
+    def perturb_model(self, layer_bounds, u, pcsd, scale_factor=1.3):
         """
-        Generate a model -----
-        Loop over each parameter, perturb it.
-        Keep the parameters with the best likelihood.
+        Solving for:
+        - thickness of each layer
+        - vs of each layer
+        - vp/vs ?
+        - sigma s and sigma p ?
         """
 
-        ## Cauchy proposal:
-        """
-        mtry[ipar] = mtry[ipar] + 1.3 * pcsd[ipar, ichain] * np.tan(
-            np.pi * (np.random.rand(1)[0] - 0.5)
-        )
-        ## Gaussian proposal
-        #            mtry[ipar] = mtry[ipar]+ 1.1*pcsd[ipar,ichain]*np.random.randn(1)
-        mtry = np.matmul(u[:, :, ichain], mtry)
-        # unnormalize
-        mtry = minlim + (mtry * maxpert)
-        """
-        # check bouncs
-
-        # return model
-
-        return None
-
-    def perturb_model():
-        pass
-
-    def perturb_params(self, station_positions, events, u, pcsd, scale_factor=1.3):
         # self is current best model
-        current_params = self.params
+        # current_params = self.params
+        thickness = self.thickness
+        n_params = len(thickness)  # unless there are uncertainties too
 
-        # normalizing, rotating to be in PC space
-        test_params = (current_params - minlim) / maxpert
+        # normalizing, rotating
+        test_params = (thickness - layer_bounds[0]) / layer_bounds[2]
         test_params = np.matmul(np.transpose(u), test_params)
 
-        # generate params to try
-        # Cauchy proposal
+        # generate params to try; Cauchy proposal
         test_params += (
-            scale_factor * self.pcsd * np.tan(np.pi * (np.random.rand(4) - 0.5))
+            scale_factor
+            * self.pcsd
+            * np.tan(np.pi * (np.random.rand(len(test_params)) - 0.5))
         )
 
-        # back to paramater space
-        mtry = np.matmul(u[:, :, ichain], mtry)
-        mtry = minlim + (mtry * maxpert)
+        # rotating back and scaling again
+        test_params = np.matmul(u, test_params)
+        test_params = layer_bounds[0] + (test_params * layer_bounds[2])
 
         # perturb each parameter in the model
 
-        for ind in len(params):
-            # new perturbed model param
+        # loop over params and perturb
+        # loop over each layer
 
-            # generate model
-            self.update_likelihood(
-                station_positions, events, param_ind=ind, param=params[ind]
-            )
+        for ind in range(n_params):
+            # validate test params
+            # calculate new likelihood
+            logL_new = self.update_likelihood(param_ind=ind, param=test_params[ind])
+            # check likelihood with each observed data
+            # model likelihood is sum of each likelihood from data
 
-            if ((maxlim - mtry).min() > 0) and (
-                (mtry - minlim).min() > 0
-            ):  # Check that mtry is inside unifrom prior:
+            logLtry = np.sum(logL)
 
-                # calculate dtry from both Vp and Vs
-                # dtry = lf.get_times(m=mtry,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-                # ... mtry.calculate_likelihood
-                logL = self.calculate_likelihood(events)
+            # Compute likelihood ratio in log space:
+            dlogL = logLtry - logLcur
+            xi = np.random.rand(1)
+            # Apply MH criterion (accept/reject)
+            if xi <= np.exp(dlogL):
+                logLcur = logLtry
+                mcur = mtry
+                dcur = dtry
 
-                logLtry = np.sum(logL)
-
-                # Compute likelihood ratio in log space:
-                dlogL = logLtry - logLcur[ichain]
-                xi = np.random.rand(1)
-                # Apply MH criterion (accept/reject)
-                if xi <= np.exp(dlogL):
-                    logLcur[ichain] = logLtry
-                    mcur[:, ichain] = mtry
-                    dcur[:, ichain] = dtry
-
-    def lin_rot():
-        if ilinrot:
-            u[:, :, 0], pcsd[:, 0] = lf.linrot(
-                m=mcur[:, 0],
-                Nsta=Nsta,
-                Ndat=Ndat,
-                Ndatev=Ndatev,
-                Npar=Npar,
-                Nevent=Nevent,
-                xr=xr,
-                yr=yr,
-                zr=zr,
-                maxpert=maxpert,
-            )
-            u[:, :, 1], pcsd[:, 1] = lf.linrot(
-                m=mcur[:, 1],
-                Nsta=Nsta,
-                Ndat=Ndat,
-                Ndatev=Ndatev,
-                Npar=Npar,
-                Nevent=Nevent,
-                xr=xr,
-                yr=yr,
-                zr=zr,
-                maxpert=maxpert,
-            )
 
     def get_derivatives(n_dm=50):
         dm = np.zeros()
@@ -254,7 +215,7 @@ class VelocityModel:
             if best > 1.0e10:
                 Jac[j, ip] = 0.0
 
-    def lin_rot(self, n_dm=50):
+    def lin_rot(self, n_dm=50, n_params):
         """
         ntot = Ndat
         dat1 = np.zeros(ntot)
@@ -300,34 +261,10 @@ class VelocityModel:
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
         # pcsd = np.sqrt(L) # PC standard deviations
 
-    def validate_params(params, bounds):
-        # check the total thickness of the model
-        # check that shear velocity fits the phase dispersion requirements
-
-        pass
-
-    def update_likelihood(self, params, station_positions, events):
+    def update_likelihood(self, vel_s, vel_s_obs, n_params, sigma_vel_s):
         """ """
-        logL_new = 0
-        for event in events:
-            # calculate log(L) for each event
-            t_obs_p = event.t_obs_p
-            t_obs_s = event.t_obs_s
+        residuals = vel_s_obs - vel_s
 
-            t_model_p, t_model_s = event.get_times(station_positions, params)
+        logL = -(1 / 2) * n_params * np.log(sigma_vel_s) -np.sum(res_p**2) / (2 * sigma_vel_s**2)
 
-            res_p = t_obs_p - t_model_p  # calculate p wave residual
-            res_s = t_obs_s - t_model_s  # calculate s wave residual
-
-            n_data_p = len(res_p)
-            n_data_s = len(res_s)
-
-            logL_p = -(1 / 2) * n_data_p * np.log(self.sigma_p)
-            -np.sum(res_p**2) / (2 * self.sigma_p**2)
-
-            logL_s = -(1 / 2) * n_data_s * np.log(self.sigma_s)
-            -np.sum(res_s**2) / (2 * self.sigma_s**2)
-
-            logL_new += logL_p + logL_s  # check dimensions
-
-            return logL_new
+        return np.sum(logL)

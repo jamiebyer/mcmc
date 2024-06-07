@@ -32,26 +32,80 @@ class Inversion:
 
         # make vector form of bounds
         self.bounds = list(bounds.values())  # should maintain order
+        # add range as a third column
+        # bounds array is min, max, range for each param
+        np.append(
+            self.bounds, (self.bounds[1, :] - self.bounds[0, :]), axis=0
+        )  # verify this!
+
+        # define n_params
+
+        self.cov_mat_sum = np.zeros(
+            (Npar, Npar, Nchain), dtype=float
+        )  # initialize covariance matrix sum
+        self.cov_mat = np.zeros(
+            (Npar, Npar, Nchain), dtype=float
+        )  # initialize covariance matrix, 3 dimmensions with Nchain
+        self.mean_sum = np.zeros(
+            (Npar, Nchain), dtype=float
+        )  # initiazlize parameter mean vector: becareful with the dimension of Nx1 vs just N (a vector)
+
+        hist_m = np.zeros(
+            (nbin + 1, Npar, Nchain), dtype=float
+        )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
+        mnew = np.zeros((Npar, Nchain), dtype=float)
+        mcur = np.zeros((Npar, Nchain), dtype=float)
+        mbar = np.zeros((Npar, Nchain), dtype=float)
+        dnew = np.zeros((Ndat, Nchain), dtype=float)
+        # initialize dnew using both Vp and Vs
+        dcur = np.zeros((Ndat, Nchain), dtype=float)
+        # initialize dcur using both Vp and Vs
+        R = np.zeros(
+            (Npar, Npar, Nchain), dtype=float
+        )  # initialize correlation matrix, 3 dimmensions with Nchain
+        R[:, :, 1] = R[:, :, 1] + 1.0
+
+        pcsd[:, 0] = 1.0 / 20.0
+        pcsd[:, 1] = 1.0 / 20.0
+        u[:, :, 0] = np.eye(Npar)
+        u[:, :, 1] = np.eye(Npar)
 
     def run_inversion(self):
         """
         Solving for:
         - thickness of each layer
         - vs of each layer
-        - vp/vs ?
-        - sigma s and sigma p ?
         """
         # linrot
+        for chain_model in self.chains:
+            chain_model.lin_rot()
 
         # mcmc random walk
-        self.random_walk()
+        resulting_model = self.random_walk()
 
-    def calculate_covariance_matrix(covariance_matrix, rotation: bool):
+        # ...
+
+    def calculate_covariance_matrix(
+        self, model_cur, covariance_matrix, chain_ind, rotation: bool
+    ):
+        """
+        np.cov
+
+        A 1-D or 2-D array containing multiple variables and observations.
+        Each row of m represents a variable, and each column a single observation of all those variables.
+        """
+
         # normalizing
-        mw = (mcur[:, ichain] - minlim) / maxpert
+        mw = (model_cur - self.bounds[0, :]) / self.bounds[2, :]
+
+        self.mean_sum[:, chain_ind] = (
+            self.mean_sum[:, chain_ind] + mw
+        )  # calculating the sum of mean(m)
+
         ncov[ichain] += 1
-        mmsum[:, ichain] = mmsum[:, ichain] + mw  # calculating the sum of mean(m)
+
         mbar[:, ichain] = mmsum[:, ichain] / ncov[ichain]
+
         mcsum[:, :, ichain] = mcsum[:, :, ichain] + np.outer(
             np.transpose(mw - mbar[:, ichain]), mw - mbar[:, ichain]
         )
