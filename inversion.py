@@ -50,6 +50,7 @@ class Inversion:
             (Npar, Nchain), dtype=float
         )  # initiazlize parameter mean vector: becareful with the dimension of Nx1 vs just N (a vector)
 
+        """
         hist_m = np.zeros(
             (nbin + 1, Npar, Nchain), dtype=float
         )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
@@ -69,16 +70,17 @@ class Inversion:
         pcsd[:, 1] = 1.0 / 20.0
         u[:, :, 0] = np.eye(Npar)
         u[:, :, 1] = np.eye(Npar)
+        """
 
-    def run_inversion(self):
+    def run_inversion(self, lin_rot=True):
         """
         Solving for:
         - thickness of each layer
         - vs of each layer
         """
-        # linrot
-        for chain_model in self.chains:
-            chain_model.lin_rot()
+        if lin_rot:  # ...
+            for chain_model in self.chains:
+                chain_model.lin_rot()
 
         # mcmc random walk
         resulting_model = self.random_walk()

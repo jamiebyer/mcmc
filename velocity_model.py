@@ -13,18 +13,22 @@ class VelocityModel:
 
         self.density = (vel_p - density_params[0]) / density_params[1]
 
+        self.params = np.concatenate(self.thickness, self.vel_s)
+        self.n_params = len(self.params)
+
         self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
         # self.vel_rayleigh = None
 
         # self.pcsd = 1 / 20
         # self.u = np.eye(n_params)
 
-    def forward_model(self):
+    def forward_model(freqs, velocity_model):
         """
         Get phase dispersion curve from shear velocities.
         """
-        pd = PhaseDispersion(*self.velocity_model)
-        pd_rayleigh = pd(self.periods, mode=0, wave="rayleigh")
+        periods = 1 / freq
+        pd = PhaseDispersion(*velocity_model)
+        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
         # ell = Ellipticity(*velocity_model.T)
 
         return pd_rayleigh
@@ -60,7 +64,9 @@ class VelocityModel:
         prem = pd.read_csv("./PREM500_IDV.csv")
 
         # generate layer thicknesses
-        thickness = np.random.uniform(layer_bounds[0], layer_bounds[1], n_layers) # change to gaussian
+        thickness = np.random.uniform(
+            layer_bounds[0], layer_bounds[1], n_layers
+        )  # change to gaussian
         depth = np.cumsum(thickness)
         radius = prem["radius"] / 1000  # convert m to km
 
@@ -71,12 +77,12 @@ class VelocityModel:
         density = density_func(depth)
 
         # get initial vs
-        prem_vs = prem["Vsh"]/1000  # convert m/s to km/s
+        prem_vs = prem["Vsh"] / 1000  # convert m/s to km/s
         vs_func = interpolate.interp1d(radius, prem_vs)
         vs = vs_func(depth)
 
         # get initial vp
-        vp_vs = np.sqrt((2-2*poisson_ratio)/(1-2*poisson_ratio))
+        vp_vs = np.sqrt((2 - 2 * poisson_ratio) / (1 - 2 * poisson_ratio))
         vp = vs * vp_vs
 
         # or since it's the true model, use prem vp
@@ -86,29 +92,34 @@ class VelocityModel:
         return velocity_model
 
     def validate_params(params, bounds):
+        # first bound applies to all layers
+        # if that is different than n_params
         return np.all(params >= bounds[0, :]) and np.all(params <= bounds[1, :])
 
-
-    def generate_starting_model(true_model, n_params, pcsd=0.05):
+    def generate_starting_model(true_model, bounds, n_params, pcsd=0.05):
+        """
+        Loop until a valid starting model is created.
+        """
+        valid_model = False
         # maybe there's another way to generate starting model
-        starting_model = true_model.copy().velocity_model + pcsd * np.random.randn(
-            n_params
-        )
+        starting_model = true_model.copy()
+        true_velocity_model = true_model.velocity_model.copy()  # ...
 
-        # validate, check bounds
+        while not valid_model:
+            starting_model.velocity_model = (
+                true_velocity_model + pcsd * np.random.randn(n_params)
+            )
+            # validate, check bounds
+            valid_model = VelocityModel.validate_params(
+                starting_model.velocity_model, bounds
+            )
+
         # calculate likelihood
-        starting_model.update_likelihood()
+        starting_model.logL = VelocityModel.get_likelihood()
+
         return starting_model
 
-
-    def perturb_model(self, layer_bounds, u, pcsd, scale_factor=1.3):
-        """
-        Solving for:
-        - thickness of each layer
-        - vs of each layer
-        - vp/vs ?
-        - sigma s and sigma p ?
-        """
+    def perturb_model(self, bounds, layer_bounds, u, pcsd, scale_factor=1.3):
 
         # self is current best model
         # current_params = self.params
@@ -133,11 +144,18 @@ class VelocityModel:
         # perturb each parameter in the model
 
         # loop over params and perturb
-        # loop over each layer
-
         for ind in range(n_params):
             # validate test params
+            if not VelocityModel.validate_params(test_params[ind], bounds):
+                continue
+
+            # calculate new vel_s from new generated thicknesses
+
             # calculate new likelihood
+            logL_new = VelocityModel.get_likelihood(
+                vel_s, vel_s_obs, n_params, sigma_vel_s
+            )
+
             logL_new = self.update_likelihood(param_ind=ind, param=test_params[ind])
             # check likelihood with each observed data
             # model likelihood is sum of each likelihood from data
@@ -153,98 +171,104 @@ class VelocityModel:
                 mcur = mtry
                 dcur = dtry
 
+    def get_jacobian(self, freqs, n_layers, dm_start, n_dm=50):
+        """
+        n_freqs is also n_depths | n_layers
+        """
+        n_freqs = len(freqs)
+        dm = np.zeros(n_dm, self.n_params)
+        dm[0] = dm_start
+        dRdm = np.zeros((self.n_params, n_freqs, n_dm))
 
-    def get_derivatives(n_dm=50):
-        dm = np.zeros()
-        dm[0] = dm_start[ip]  # Estimate deriv for range of dm values
-        for i in range(NDM):
-            # print i,ip
-            mtry1 = m.copy()
-            mtry1[ip] = mtry1[ip] + dm[i]
-            # dat1 = get_times(m=mtry1,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-            for iev in range(Nevent):
-                mtmp = np.append(mtry1[iev * 4 : (iev + 1) * 4], mtry1[-4:])
-                dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
-                ist = iev * Ndatev
-                iend = (iev + 1) * Ndatev
-                dat1[ist:iend] = dtmp
+        # Estimate deriv for range of dm values
+        for dm_ind in range(n_dm):
+            model_pos = self.velocity_model.copy() + dm[dm_ind]
+            model_neg = self.velocity_model.copy() - dm[dm_ind]
 
-            mtry2 = m.copy()
-            mtry2[ip] = mtry2[ip] - dm[i]
-            # dat2 = get_times(m=mtry2,xr=xr,yr=yr,zr=zr,Nsta=Nsta)
-            for iev in range(Nevent):
-                mtmp = np.append(mtry2[iev * 4 : (iev + 1) * 4], mtry2[-4:])
-                dtmp = get_times(m=mtmp, xr=xr, yr=yr, zr=zr, Nsta=Nsta)
-                ist = iev * Ndatev
-                iend = (iev + 1) * Ndatev
-                dat2[ist:iend] = dtmp
+            for param_ind in range(self.n_params):
+                model_pos[param_ind] = model_pos[param_ind] + dm[param_ind, dm_ind]
 
-            for j in range(ntot):
-                if np.abs((dat1[j] - dat2[j]) / (dat1[j] + dat2[j])) > 1.0e-7:
-                    dRdm[ip, j, i] = (dat1[j] - dat2[j]) / (2.0 * dm[i])
-                else:
-                    dRdm[ip, j, i] = 0.0
-            if i < NDM - 1:
-                dm[i + 1] = dm[i] / 1.5
+                # loop over each layer
+                for layer_ind in range(n_layers):
+                    pdr_pos = VelocityModel.forward_model(freqs, model_pos)
+                    pdr_neg = VelocityModel.forward_model(freqs, model_neg)
 
-    def get_best_derivative():
-        for j in range(ntot):  # For each datum, choose best derivative estimate
+                dRdm[param_ind, :, dm_ind] = np.where(
+                    (np.abs((pdr_pos - pdr_neg) / (pdr_pos + pdr_neg)) > 1.0e-7 < 5),
+                    (pdr_pos - pdr_neg) / (2.0 * dm[param_ind, dm_ind]),
+                    dRdm[param_ind, :, dm_ind],
+                )
+
+                # setting dm for the next loop
+                if dm_ind < n_dm - 1:
+                    dm[:, dm_ind + 1] = dm[:, dm_ind] / 1.5
+
+        Jac = VelocityModel.get_best_derivative(dRdm)
+
+        return Jac
+
+    def get_best_derivative(dRdm, n_layers, n_dm):
+        for layer_ind in range(
+            n_layers
+        ):  # For each datum, choose best derivative estimate
             best = 1.0e10
             ibest = 1
-            for i in range(NDM - 2):
-                if (
-                    (np.abs(dRdm[ip, j, i + 0]) < 1.0e-7)
-                    or (np.abs(dRdm[ip, j, i + 1]) < 1.0e-7)
-                    or (np.abs(dRdm[ip, j, i + 2]) < 1.0e-7)
-                ):
+
+            for dm_ind in range(n_dm - 2):
+
+                # check if the derivative will very very large
+                deriv_test = np.where(dRdm[ip, layer_ind, :])
+
+                if np.any(np.abs(dRdm[ip, layer_ind, dm_ind : dm_ind + 2]) < 1.0e-7):
                     test = 1.0e20
+
                 else:
                     test = np.abs(
-                        (
-                            dRdm[ip, j, i + 0] / dRdm[ip, j, i + 1]
-                            + dRdm[ip, j, i + 1] / dRdm[ip, j, i + 2]
+                        np.sum(
+                            (
+                                dRdm[ip, layer_ind, dm_ind : dm_ind + 1]
+                                / dRdm[ip, layer_ind, dm_ind + 1 : dm_ind + 2]
+                            )
+                            / 2
+                            - 1
                         )
-                        / 2.0
-                        - 1.0
                     )
 
                 if (test < best) and (test > 1.0e-7):
                     best = test
-                    ibest = i + 1
-            Jac[j, ip] = dRdm[ip, j, ibest]  # Best deriv into Jacobian
+                    ibest = dm_ind + 1
+
+            Jac[layer_ind, ip] = dRdm[ip, layer_ind, ibest]  # Best deriv into Jacobian
             if best > 1.0e10:
-                Jac[j, ip] = 0.0
+                Jac[layer_ind, ip] = 0.0
 
-    def lin_rot(self, n_dm=50, n_params):
+    def lin_rot(self, bounds, n_dm=50):
         """
-        ntot = Ndat
-        dat1 = np.zeros(ntot)
-        dat2 = np.zeros(ntot)
-        dRdm = np.zeros((Npar, ntot, n_dm))
-        dm_start = np.zeros(Npar)
-        Jac = np.zeros((ntot, Npar))
-        JactCdinv = np.zeros((ntot, ntot))
-        Cdinv = np.zeros((ntot, ntot))
-        Mpriorinv = np.zeros((Npar, Npar))
-        Ctmp = np.zeros((Npar, Npar))
-        VT = np.zeros((Npar, Npar))
-        V = np.zeros((Npar, Npar))
-        L = np.zeros(Npar)
-        pcsd = np.zeros(Npar)
+        ntot: Ndat
+        dat1: np.zeros(ntot)
+        dat2: np.zeros(ntot)
+        dRdm: (Npar, ntot, NDM)
+        dm_start: (Npar)
+        Jac: (ntot, Npar)
+        JactCdinv: (ntot, ntot)
+        Cdinv: (ntot, ntot)
+        Mpriorinv: (Npar, Npar)
+        Ctmp: (Npar, Npar)
+        VT: (Npar, Npar)
+        V: (Npar, Npar)
+        L: (Npar)
+        pcsd: (Npar)
         """
 
-        dm_start = m * 0.1
-        sigma = m[-2:]
+        dm_start = self.params * 0.1
 
-        for param in params:
-            # calculate n_loops derivatives
-            self.get_derivatives()
-            self.get_best_derivative
+        for param in range(self.n_params):
+            Jac = self.get_jacobian()
 
-        for i in range(Npar):  # Scale columns of Jacobian for stability
-            Jac[:, i] = Jac[:, i] * maxpert[i]
+        for i in range(self.n_params):  # Scale columns of Jacobian for stability
+            Jac[:, i] = Jac[:, i] * bounds[2, i]
 
-        for i in range(Npar):
+        for i in range(self.n_params):
             Mpriorinv[i, i] = 12.0  # variance for U[0,1]=1/12
 
         i = 0
@@ -255,16 +279,19 @@ class VelocityModel:
                     i += 1
         JactCdinv = np.matmul(np.transpose(Jac), Cdinv)
         Ctmp = np.matmul(JactCdinv, Jac) + Mpriorinv
-        # Ctmp = np.linalg.inv(np.matmul(JactCdinv,Jac) + Mpriorinv)
+        # Ctmp = np.linalg.inv(np.matmul(JactCdinv,Jac) +n_ Mpriorinv)
 
         V, L, VT = np.linalg.svd(Ctmp)
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
-        # pcsd = np.sqrt(L) # PC standard deviations
 
-    def update_likelihood(self, vel_s, vel_s_obs, n_params, sigma_vel_s):
+        return pcsd
+
+    def get_likelihood(vel_s, vel_s_obs, n_params, sigma_vel_s):
         """ """
         residuals = vel_s_obs - vel_s
 
-        logL = -(1 / 2) * n_params * np.log(sigma_vel_s) -np.sum(res_p**2) / (2 * sigma_vel_s**2)
+        logL = -(1 / 2) * n_params * np.log(sigma_vel_s) - np.sum(res_p**2) / (
+            2 * sigma_vel_s**2
+        )
 
         return np.sum(logL)
