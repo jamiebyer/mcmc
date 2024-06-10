@@ -1,4 +1,3 @@
-(index -> (radius,density,Vpv,Vsv,Q-kappa,Q-mu,Vph,Vsh,eta))
 radius[unit="m"],density[unit="kg/m^3"],Vpv[unit="m/s"],Vsv[unit="m/s"],Q-kappa[unit=""],Q-mu[unit=""],Vph[unit="m/s"],Vsh[unit="m/s"],eta[unit=""]
 0.,13088.50,11262.20,3667.80,100000.0,104.0,11262.20,3667.80,1.00000
 12858.,13088.46,11262.17,3667.78,100000.0,104.0,11262.17,3667.78,1.00000

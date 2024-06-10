@@ -1,21 +1,27 @@
 import numpy as np
 from inversion import Inversion
-from event import Event
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
-from velocity_model import generate_true_model, generate_starting_model
+from velocity_model import VelocityModel
 
 # TODO:
 # - add environment
 # - readme
 # - figures folder
 # - add tests
+# - fix linters
 
 
-def setup_scene(n_layers=10, poisson_ratio=0.265, density_params=None, pcsd=1 / 20):
+def setup_scene(
+    n_layers,
+    poisson_ratio=0.265,
+    density_params=[-1.91018882e-03, 1.46683536e04],
+    sigma_pd=0.1,
+    pcsd=0.05,
+):
     """
-    Define bounds, station positions...
+    Define variables for initialization.
     """
 
     # Bounds of search (min, max)
@@ -24,29 +30,30 @@ def setup_scene(n_layers=10, poisson_ratio=0.265, density_params=None, pcsd=1 / 
         "layer_thickness": [0, 10],
         "v_p": [3, 7],
         "v_s": [2, 6],
-        "sigma_p": [0, 1],
-        "sigma_s": [0, 1],
+        "sigma_pd": [0, 1],
     }
     # Initial velocity model
-    true_model = generate_true_model(
-        n_layers,
-        bounds["layer_thickness"],
-        poisson_ratio,
+
+    true_model = VelocityModel.generate_true_model(
+        n_layers, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
     )
 
-    pd_rayleigh = true_model.forward_model()
+    # define freqs from layer thickness
+    period = np.linspace(1, 100, 10)
+    freqs = 3 * 1 / period
+    pd_rayleigh = VelocityModel.forward_model(freqs, true_model.velocity_model)
+    # add noise
     avg_vs_obs = pd_rayleigh.velocity + sigma_pd * np.random.randn(n_layers)
 
-    starting_model = generate_starting_model(true_model, pcsd, n_layers)
-
-    return avg_vs_obs, starting_model, bounds, n_layers
+    return true_model, avg_vs_obs, bounds
 
 
-def run():
+def run(n_layers=10):
     """
     Run inversion.
     """
-    avg_vs_obs, starting_model, bounds, n_layers = setup_scene()
+    _, avg_vs_obs, bounds = setup_scene(n_layers)
+    starting_model = VelocityModel.generate_starting_model(true_model, bounds, n_params)
     inversion = Inversion(
         avg_vs_obs,
         starting_model,
@@ -57,6 +64,10 @@ def run():
     resulting_model = inversion.run_inversion()
 
 
+def create_test_data():
+    pass
+
+
 def plot_results():
     # TODO:
     # add units
@@ -64,11 +75,16 @@ def plot_results():
     # save figures directly to folder
     # plot density
 
-    station_positions, events, prior_model, bounds = setup_scene()
-    periods = np.linspace(1, 100, 100)  # unit
-    pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
+    true_model, avg_vs_obs, bounds = setup_scene(n_layers=10)
 
-    plot_model_setup(prior_model.velocity_model, station_positions)
+    # periods = np.linspace(1, 100, 100)  # unit
+    # freqs = 1 / periods
+
+    # pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
+
+    plot_model_setup(true_model, avg_vs_obs)
+    # plot density
+    # plot true model with and without noise
 
     # plot_velocity_profile(prior_model, periods)
 
@@ -79,48 +95,40 @@ def plot_results():
     # make simulated data, save to csv
 
 
-def plot_model_setup(velocity_model, station_positions):
+def plot_model_setup(velocity_model, avg_vs_obs):
     # plot velocity_model
     # thickness, Vp, Vs, density
     # km, km/s, km/s, g/cm3
 
-    depth = np.cumsum(velocity_model[:, 0])
-    vel_p = velocity_model[:, 1]
-    vel_s = velocity_model[:, 2]
-    density = velocity_model[:, 3]
+    depth = np.cumsum(velocity_model.thickness)
 
-    plt.subplot(1, 2, 1)
-    plt.scatter(vel_p, depth, label="vp")
-    plt.scatter(vel_s, depth, label="vs")
+    plt.subplot(2, 2, 1)
+    plt.scatter(velocity_model.vel_p, depth)
+    # plt.axhline(thickness)
     plt.gca().invert_yaxis()
-    plt.xlabel("velocity (km/s)")
+    plt.xlabel("P wave velocity (km/s)")
     plt.ylabel("depth (km)")
 
-    plt.subplot(1, 2, 2)
-    plt.scatter(density, depth)
+    plt.subplot(2, 2, 2)
+    plt.scatter(velocity_model.vel_s, depth)
+    plt.gca().invert_yaxis()
+    plt.xlabel("S wave velocity (km/s)")
+    plt.ylabel("depth (km)")
+
+    plt.subplot(2, 2, 3)
+    plt.scatter((velocity_model.density), depth)
+    plt.ticklabel_format(style="sci", scilimits=(-2, 2))
     plt.gca().invert_yaxis()
     plt.xlabel("density (g/cm3)")
     plt.ylabel("depth (km)")
 
-    # plot station locations
+    plt.subplot(2, 2, 4)
+    plt.scatter(avg_vs_obs, depth)
+    plt.gca().invert_yaxis()
+    plt.xlabel("avg vs observed (km/s)")
+    plt.ylabel("depth (km)")
+
     plt.tight_layout()
-    plt.show()
-
-    plt.subplot(1, 3, 1)
-    plt.scatter(station_positions["lat"], station_positions["lon"])
-    plt.xlabel("lat")
-    plt.xlabel("lon")
-
-    plt.subplot(1, 3, 2)
-    plt.scatter(station_positions["lat"], station_positions["depth"])
-    plt.xlabel("lat")
-    plt.xlabel("depth")
-
-    plt.subplot(1, 3, 3)
-    plt.scatter(station_positions["lon"], station_positions["depth"])
-    plt.xlabel("lon")
-    plt.xlabel("depth")
-
     plt.show()
 
 

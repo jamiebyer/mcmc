@@ -5,19 +5,19 @@ from scipy import interpolate
 
 
 class VelocityModel:
-    def __init__(self, thickness, vel_p, vel_s, sigma_rayleigh, density_params):
+    def __init__(self, thickness, vel_p, vel_s, density_params, sigma_pd):
         self.thickness = thickness
         self.vel_p = vel_p
         self.vel_s = vel_s
-        self.sigma_rayleigh = sigma_rayleigh
+        self.sigma_pd = sigma_pd
 
         self.density = (vel_p - density_params[0]) / density_params[1]
 
-        self.params = np.concatenate(self.thickness, self.vel_s)
+        self.params = self.thickness  # and uncertainty?
         self.n_params = len(self.params)
 
         self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
-        # self.vel_rayleigh = None
+        self.vel_rayleigh = None
 
         # self.pcsd = 1 / 20
         # self.u = np.eye(n_params)
@@ -26,7 +26,7 @@ class VelocityModel:
         """
         Get phase dispersion curve from shear velocities.
         """
-        periods = 1 / freq
+        periods = 1 / freqs
         pd = PhaseDispersion(*velocity_model)
         pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
         # ell = Ellipticity(*velocity_model.T)
@@ -37,6 +37,18 @@ class VelocityModel:
         # Birch's law
         density = (vel_p - density_params[0]) / density_params[1]
         return density
+
+    def get_birch_params():
+        # fit to prem
+        # density = (vel_p - density_params[0]) / density_params[1]
+        prem = pd.read_csv("./PREM500_IDV.csv")
+
+        radius = prem['radius[unit="m"]']
+        prem_density = prem['density[unit="kg/m^3"]']
+
+        # fit the curve
+        density_params = np.polyfit(radius, prem_density, deg=1)
+        # returns [-1.91018882e-03  1.46683536e+04]
 
     def get_vel_s_profile(self, freq, vel_rayleigh):
         # get wavelength from frequency
@@ -59,7 +71,12 @@ class VelocityModel:
 
         return depths, vel_s
 
-    def generate_true_model(n_layers, layer_bounds, poisson_ratio):
+    def generate_true_model(
+        n_layers, layer_bounds, poisson_ratio, density_params, sigma_pd
+    ):
+        """
+        Generate true model, which will be used to create simulated observed pd curves.
+        """
         # from PREM...
         prem = pd.read_csv("./PREM500_IDV.csv")
 
@@ -67,28 +84,41 @@ class VelocityModel:
         thickness = np.random.uniform(
             layer_bounds[0], layer_bounds[1], n_layers
         )  # change to gaussian
+        # this is setting the depth to be the bottom of each layer ***
         depth = np.cumsum(thickness)
-        radius = prem["radius"] / 1000  # convert m to km
+        radius = prem['radius[unit="m"]'] / 1000  # m -> km
 
         # interpolate density
-        # prolly want the avg of each layer or something
-        prem_density = prem["density"]  # kg/m^3
+        # prolly want the avg of each layer or something ***
+        prem_density = prem['density[unit="kg/m^3"]'] / 1000  # kg/m^3 -> g/cm3
         density_func = interpolate.interp1d(radius, prem_density)
         density = density_func(depth)
 
         # get initial vs
-        prem_vs = prem["Vsh"] / 1000  # convert m/s to km/s
+        # velocities are split into components
+        vsh = prem['Vsh[unit="m/s"]'] / 1000  # m/s -> km/s
+        vsv = prem['Vsv[unit="m/s"]'] / 1000  # m/s -> km/s
+        prem_vs = np.sqrt(vsh**2 + vsv**2)
         vs_func = interpolate.interp1d(radius, prem_vs)
-        vs = vs_func(depth)
+        vel_s = vs_func(depth)
 
+        # ***
         # get initial vp
         vp_vs = np.sqrt((2 - 2 * poisson_ratio) / (1 - 2 * poisson_ratio))
-        vp = vs * vp_vs
+        vel_p = vel_s * vp_vs
 
         # or since it's the true model, use prem vp
+        # vph = prem['Vph[unit="m/s"]'] / 1000  # m/s -> km/s
+        # vpv = prem['Vpv[unit="m/s"]'] / 1000  # m/s -> km/s
+        # prem_vp = np.sqrt(vph**2 + vpv**2)
+        # vp_func = interpolate.interp1d(radius, prem_vp)
+        # vp = vp_func(depth)
 
         # assemble velocity model
-        velocity_model = [thickness, vp, vs, density]
+        velocity_model = VelocityModel(
+            thickness, vel_p, vel_s, density_params, sigma_pd
+        )
+
         return velocity_model
 
     def validate_params(params, bounds):
@@ -102,7 +132,7 @@ class VelocityModel:
         """
         valid_model = False
         # maybe there's another way to generate starting model
-        starting_model = true_model.copy()
+        starting_model = true_model  # .copy()
         true_velocity_model = true_model.velocity_model.copy()  # ...
 
         while not valid_model:
@@ -153,23 +183,17 @@ class VelocityModel:
 
             # calculate new likelihood
             logL_new = VelocityModel.get_likelihood(
-                vel_s, vel_s_obs, n_params, sigma_vel_s
+                pd_rayleigh, pd_rayleigh_obs, n_params, sigma_pd_rayleigh
             )
 
-            logL_new = self.update_likelihood(param_ind=ind, param=test_params[ind])
-            # check likelihood with each observed data
-            # model likelihood is sum of each likelihood from data
-
-            logLtry = np.sum(logL)
-
             # Compute likelihood ratio in log space:
-            dlogL = logLtry - logLcur
+            dlogL = logL_new - self.logL
             xi = np.random.rand(1)
             # Apply MH criterion (accept/reject)
             if xi <= np.exp(dlogL):
-                logLcur = logLtry
-                mcur = mtry
-                dcur = dtry
+                self.logL = logLnew
+                self.params = test_params  # validate this
+                # self.vel_rayleigh =
 
     def get_jacobian(self, freqs, n_layers, dm_start, n_dm=50):
         """
@@ -215,13 +239,9 @@ class VelocityModel:
             ibest = 1
 
             for dm_ind in range(n_dm - 2):
-
                 # check if the derivative will very very large
-                deriv_test = np.where(dRdm[ip, layer_ind, :])
-
                 if np.any(np.abs(dRdm[ip, layer_ind, dm_ind : dm_ind + 2]) < 1.0e-7):
                     test = 1.0e20
-
                 else:
                     test = np.abs(
                         np.sum(
@@ -243,43 +263,17 @@ class VelocityModel:
                 Jac[layer_ind, ip] = 0.0
 
     def lin_rot(self, bounds, n_dm=50):
-        """
-        ntot: Ndat
-        dat1: np.zeros(ntot)
-        dat2: np.zeros(ntot)
-        dRdm: (Npar, ntot, NDM)
-        dm_start: (Npar)
-        Jac: (ntot, Npar)
-        JactCdinv: (ntot, ntot)
-        Cdinv: (ntot, ntot)
-        Mpriorinv: (Npar, Npar)
-        Ctmp: (Npar, Npar)
-        VT: (Npar, Npar)
-        V: (Npar, Npar)
-        L: (Npar)
-        pcsd: (Npar)
-        """
 
-        dm_start = self.params * 0.1
+        Jac = self.get_jacobian()
+        Jac[:, i] = Jac[:, i] * bounds[2, i]  # Scale columns of Jacobian for stability
 
-        for param in range(self.n_params):
-            Jac = self.get_jacobian()
+        # what should this value be ??
+        Mpriorinv = np.diag(self.n_params * [12])  # variance for U[0,1]=1/12
 
-        for i in range(self.n_params):  # Scale columns of Jacobian for stability
-            Jac[:, i] = Jac[:, i] * bounds[2, i]
+        Cdinv = no.diag(1 / sigma**2)  # what should sigma be ??
 
-        for i in range(self.n_params):
-            Mpriorinv[i, i] = 12.0  # variance for U[0,1]=1/12
-
-        i = 0
-        for iev in range(Nevent):
-            for ifq in range(2):
-                for ista in range(Nsta):
-                    Cdinv[i, i] = 1.0 / sigma[ifq] ** 2
-                    i += 1
         JactCdinv = np.matmul(np.transpose(Jac), Cdinv)
         Ctmp = np.matmul(JactCdinv, Jac) + Mpriorinv
-        # Ctmp = np.linalg.inv(np.matmul(JactCdinv,Jac) +n_ Mpriorinv)
 
         V, L, VT = np.linalg.svd(Ctmp)
         pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
@@ -288,6 +282,7 @@ class VelocityModel:
 
     def get_likelihood(vel_s, vel_s_obs, n_params, sigma_vel_s):
         """ """
+        # probably using dispersion curves, compare directly to data
         residuals = vel_s_obs - vel_s
 
         logL = -(1 / 2) * n_params * np.log(sigma_vel_s) - np.sum(res_p**2) / (

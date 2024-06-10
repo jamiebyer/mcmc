@@ -78,6 +78,7 @@ class Inversion:
         - thickness of each layer
         - vs of each layer
         """
+        # instead of lin_rot, use a PC package ??
         if lin_rot:  # ...
             for chain_model in self.chains:
                 chain_model.lin_rot()
@@ -127,8 +128,7 @@ class Inversion:
             )  # rotate it to its Singular Value Decomposition
             pcsd[:, ichain] = np.sqrt(s)
 
-    def random_walk(self):
-        # initialize correlation matrix, 3 dimmensions with Nchain
+    def random_walk(self, cconv=0.3):
         correlation_mat = np.zeros(
             (self.n_layers, self.n_layers, self.n_chains), dtype=float
         )
@@ -171,6 +171,7 @@ class Inversion:
                     c_new[ichain] >= 1
                 ):  # calculate the difference between ichain parameters
                     # calculating histograms
+
                     for ipar in np.arange(len(mt)):
                         edge = np.linspace(minlim[ipar], maxlim[ipar], nbin + 1)
                         idx_dif = np.argmin(abs(edge - mcur[ipar, ichain]))
