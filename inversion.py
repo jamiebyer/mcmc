@@ -18,10 +18,8 @@ class Inversion:
         """ """
         self.avg_vs_obs = avg_vs_obs
         self.bounds = bounds
-
         self.n_layers = n_layers
         self.n_chains = n_chains
-
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
@@ -73,11 +71,6 @@ class Inversion:
         """
 
     def run_inversion(self, lin_rot=True):
-        """
-        Solving for:
-        - thickness of each layer
-        - vs of each layer
-        """
         # instead of lin_rot, use a PC package ??
         if lin_rot:  # ...
             for chain_model in self.chains:
@@ -92,9 +85,7 @@ class Inversion:
         self, model_cur, covariance_matrix, chain_ind, rotation: bool
     ):
         """
-        np.cov
-
-        A 1-D or 2-D array containing multiple variables and observations.
+        np.cov: A 1-D or 2-D array containing multiple variables and observations.
         Each row of m represents a variable, and each column a single observation of all those variables.
         """
 

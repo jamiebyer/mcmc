@@ -126,7 +126,7 @@ class VelocityModel:
         # if that is different than n_params
         return np.all(params >= bounds[0, :]) and np.all(params <= bounds[1, :])
 
-    def generate_starting_model(true_model, bounds, n_params, pcsd=0.05):
+    def generate_starting_model(true_model, bounds, pcsd=0.05):
         """
         Loop until a valid starting model is created.
         """
@@ -137,7 +137,7 @@ class VelocityModel:
 
         while not valid_model:
             starting_model.velocity_model = (
-                true_velocity_model + pcsd * np.random.randn(n_params)
+                true_velocity_model + pcsd * np.random.randn(true_model.n_params)
             )
             # validate, check bounds
             valid_model = VelocityModel.validate_params(

@@ -17,7 +17,7 @@ def setup_scene(
     n_layers,
     poisson_ratio=0.265,
     density_params=[-1.91018882e-03, 1.46683536e04],
-    sigma_pd=0.1,
+    sigma_pd=0.0001,
     pcsd=0.05,
 ):
     """
@@ -27,7 +27,7 @@ def setup_scene(
     # Bounds of search (min, max)
     # density bounds
     bounds = {
-        "layer_thickness": [0, 10],
+        "layer_thickness": [5, 15],
         "v_p": [3, 7],
         "v_s": [2, 6],
         "sigma_pd": [0, 1],
@@ -43,29 +43,20 @@ def setup_scene(
     freqs = 3 * 1 / period
     pd_rayleigh = VelocityModel.forward_model(freqs, true_model.velocity_model)
     # add noise
-    avg_vs_obs = pd_rayleigh.velocity + sigma_pd * np.random.randn(n_layers)
+    avg_vs_true = pd_rayleigh.velocity
+    avg_vs_obs = avg_vs_true + sigma_pd * np.random.randn(n_layers)
 
-    return true_model, avg_vs_obs, bounds
+    return true_model, avg_vs_true, avg_vs_obs, bounds
 
 
 def run(n_layers=10):
     """
     Run inversion.
     """
-    _, avg_vs_obs, bounds = setup_scene(n_layers)
-    starting_model = VelocityModel.generate_starting_model(true_model, bounds, n_params)
-    inversion = Inversion(
-        avg_vs_obs,
-        starting_model,
-        bounds,
-        n_layers,
-        n_chains=2,
-    )
+    true_model, _, avg_vs_obs, bounds = setup_scene(n_layers)
+    starting_model = VelocityModel.generate_starting_model(true_model, bounds)
+    inversion = Inversion(avg_vs_obs, starting_model, bounds, n_layers)
     resulting_model = inversion.run_inversion()
-
-
-def create_test_data():
-    pass
 
 
 def plot_results():
@@ -75,14 +66,14 @@ def plot_results():
     # save figures directly to folder
     # plot density
 
-    true_model, avg_vs_obs, bounds = setup_scene(n_layers=10)
+    true_model, avg_vs_true, avg_vs_obs, bounds = setup_scene(n_layers=10)
 
     # periods = np.linspace(1, 100, 100)  # unit
     # freqs = 1 / periods
 
     # pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
 
-    plot_model_setup(true_model, avg_vs_obs)
+    plot_model_setup(true_model, avg_vs_true, avg_vs_obs, bounds)
     # plot density
     # plot true model with and without noise
 
@@ -95,7 +86,7 @@ def plot_results():
     # make simulated data, save to csv
 
 
-def plot_model_setup(velocity_model, avg_vs_obs):
+def plot_model_setup(velocity_model, avg_vs_true, avg_vs_obs, bounds):
     # plot velocity_model
     # thickness, Vp, Vs, density
     # km, km/s, km/s, g/cm3
@@ -104,7 +95,7 @@ def plot_model_setup(velocity_model, avg_vs_obs):
 
     plt.subplot(2, 2, 1)
     plt.scatter(velocity_model.vel_p, depth)
-    # plt.axhline(thickness)
+    # plt.axvline(bounds[])
     plt.gca().invert_yaxis()
     plt.xlabel("P wave velocity (km/s)")
     plt.ylabel("depth (km)")
@@ -123,27 +114,14 @@ def plot_model_setup(velocity_model, avg_vs_obs):
     plt.ylabel("depth (km)")
 
     plt.subplot(2, 2, 4)
-    plt.scatter(avg_vs_obs, depth)
+    plt.scatter(avg_vs_true, depth, label="true")
+    plt.scatter(avg_vs_obs, depth, label="obs")
+    for d in depth:
+        plt.axhline(d)
     plt.gca().invert_yaxis()
     plt.xlabel("avg vs observed (km/s)")
     plt.ylabel("depth (km)")
 
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_phase_dispersion():
-    pass
-
-
-def plot_velocity_profile(prior_model, periods):
-
-    depths, vel_s_profile = prior_model.get_vel_s_profile(periods)
-
-    plt.scatter(vel_s_profile, depths)
-    plt.gca().invert_yaxis()
-    plt.xlabel("shear velocity (km/s)")
-    plt.ylabel("depth (km)")
     plt.tight_layout()
     plt.show()
 
