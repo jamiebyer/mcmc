@@ -12,6 +12,7 @@ class Inversion:
         n_burn=10000,  # index for burning
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
+        n_bins=200,
     ):
         # TODO:
         # add in burning, keeping, rotation indices.
@@ -24,6 +25,7 @@ class Inversion:
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of random walks
+        self.n_bins = n_bins
 
         self.chains = np.fill(n_chains, starting_model)
         self.logL = np.zeros(n_chains)
@@ -36,21 +38,8 @@ class Inversion:
             self.bounds, (self.bounds[1, :] - self.bounds[0, :]), axis=0
         )  # verify this!
 
-        # define n_params
-
-        self.cov_mat_sum = np.zeros(
-            (Npar, Npar, Nchain), dtype=float
-        )  # initialize covariance matrix sum
-        self.cov_mat = np.zeros(
-            (Npar, Npar, Nchain), dtype=float
-        )  # initialize covariance matrix, 3 dimmensions with Nchain
-        self.mean_sum = np.zeros(
-            (Npar, Nchain), dtype=float
-        )  # initiazlize parameter mean vector: becareful with the dimension of Nx1 vs just N (a vector)
-
-        """
         hist_m = np.zeros(
-            (nbin + 1, Npar, Nchain), dtype=float
+            (self.n_bins + 1, Npar, Nchain), dtype=float
         )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
         mnew = np.zeros((Npar, Nchain), dtype=float)
         mcur = np.zeros((Npar, Nchain), dtype=float)
@@ -59,16 +48,11 @@ class Inversion:
         # initialize dnew using both Vp and Vs
         dcur = np.zeros((Ndat, Nchain), dtype=float)
         # initialize dcur using both Vp and Vs
-        R = np.zeros(
-            (Npar, Npar, Nchain), dtype=float
-        )  # initialize correlation matrix, 3 dimmensions with Nchain
-        R[:, :, 1] = R[:, :, 1] + 1.0
 
-        pcsd[:, 0] = 1.0 / 20.0
-        pcsd[:, 1] = 1.0 / 20.0
-        u[:, :, 0] = np.eye(Npar)
-        u[:, :, 1] = np.eye(Npar)
-        """
+        correlation_mat = np.zeros(
+            (self.n_layers, self.n_layers, self.n_chains), dtype=float
+        )
+        correlation_mat[:, :, 1] += 1
 
     def run_inversion(self, lin_rot=True):
         # instead of lin_rot, use a PC package ??
@@ -81,9 +65,7 @@ class Inversion:
 
         # ...
 
-    def calculate_covariance_matrix(
-        self, model_cur, covariance_matrix, chain_ind, rotation: bool
-    ):
+    def calculate_covariance_matrix(self, model_cur, covariance_matrix, rotation: bool):
         """
         np.cov: A 1-D or 2-D array containing multiple variables and observations.
         Each row of m represents a variable, and each column a single observation of all those variables.
@@ -92,22 +74,20 @@ class Inversion:
         # normalizing
         mw = (model_cur - self.bounds[0, :]) / self.bounds[2, :]
 
-        self.mean_sum[:, chain_ind] = (
-            self.mean_sum[:, chain_ind] + mw
-        )  # calculating the sum of mean(m)
+        model_cur.mean_sum += mw  # calculating the sum of mean(m)
 
-        ncov[ichain] += 1
+        model_cur.ncov += 1
 
-        mbar[:, ichain] = mmsum[:, ichain] / ncov[ichain]
+        mbar[:, ichain] = mmsum[:, ichain] / model_cur.ncov
 
         mcsum[:, :, ichain] = mcsum[:, :, ichain] + np.outer(
             np.transpose(mw - mbar[:, ichain]), mw - mbar[:, ichain]
         )
 
         Cov[:, :, ichain] = (
-            mcsum[:, :, ichain] / ncov[ichain]
+            mcsum[:, :, ichain] / model_cur.ncov
         )  # calculating covariance matrix
-        for ipar in range(Npar):
+        for ipar in range(self.n_params):
             for jpar in range(Npar):
                 covariance_matrix[ipar, jpar, ichain] = Cov[
                     ipar, jpar, ichain
@@ -120,47 +100,36 @@ class Inversion:
             pcsd[:, ichain] = np.sqrt(s)
 
     def random_walk(self, cconv=0.3):
-        correlation_mat = np.zeros(
-            (self.n_layers, self.n_layers, self.n_chains), dtype=float
-        )
-        correlation_mat[:, :, 1] += 1
-
-        for i in range(self.n_mcmc):
-
-            c_diff = np.max(
-                np.max(np.abs(correlation_mat[:, :, 0] - correlation_mat[:, :, 1]))
+        # move correlation matrix to velocity model
+        c_diff = np.max(
+            np.max(
+                np.abs(self.correlation_mat[:, :, 0] - self.correlation_mat[:, :, 1])
             )
+        )
+        rotation = False
+        if c_diff < cconv:
+            rotation = True
 
-            if c_diff < cconv:
+        save_cov_mat = False
+        for i in range(self.n_mcmc):
+            # rotation ind should prolly be on inversion class
+
+            if n_steps > NBURNIN and rotation is False:
                 rotation = True
+                n_steps = 0
+            if n_steps > NKEEP and rotation is True:
+                save_cov_mat = True
+                n_steps = 0
+                # mcsum[:, :, ichain] = 0.0
+                # mmsum[:, ichain] = 0.0
 
+            # will n_steps ever need to be separate for each model
             for chain_model in self.chains:
-
                 chain_model.perturb_params()
-                """
-                if (icount[ichain] > NKEEP) & (
-                    c_new[ichain] >= 1
-                ):  # c_new 2 is for activating rotation
-                    c_new[ichain] = 2
-                    icount[ichain] = 0
-                if (icount[ichain] > NBURNIN) & (
-                    c_new[ichain] == 0
-                ):  # eliminate the first # of computing covariance
-                    icount[ichain] = 0
-                    c_new[ichain] = 1
-                    ncov[ichain] = 0.0
-                    mcsum[:, :, ichain] = 0.0
-                    mmsum[:, ichain] = 0.0
-                
-                """
-
                 covariance_matrix = self.calculate_covariance_matrix()
 
-                icount[ichain] += 1  # counter for rotation matrix
-
-                if (
-                    c_new[ichain] >= 1
-                ):  # calculate the difference between ichain parameters
+                if save_cov_mat:
+                    # calculate the difference between ichain parameters
                     # calculating histograms
 
                     for ipar in np.arange(len(mt)):
@@ -179,6 +148,8 @@ class Inversion:
                     # print((iacc[ichain,:]).astype(float)/(iprop[ichain,:]).astype(float))
                     if imcmc >= NBURNIN:
                         ikeep += 1  # keeping track of the idex to write into a file
+
+                n_steps += 1
 
     def check_convergence():
         # SUBTRACTING 2 NORMALIZED HISTOGRAM

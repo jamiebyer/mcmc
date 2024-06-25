@@ -43,19 +43,19 @@ def setup_scene(
     freqs = 3 * 1 / period
     pd_rayleigh = VelocityModel.forward_model(freqs, true_model.velocity_model)
     # add noise
-    avg_vs_true = pd_rayleigh.velocity
-    avg_vs_obs = avg_vs_true + sigma_pd * np.random.randn(n_layers)
+    phase_vel_true = pd_rayleigh.velocity
+    phase_vel_obs = phase_vel_true + sigma_pd * np.random.randn(n_layers)
 
-    return true_model, avg_vs_true, avg_vs_obs, bounds
+    return true_model, phase_vel_true, phase_vel_obs, bounds
 
 
 def run(n_layers=10):
     """
     Run inversion.
     """
-    true_model, _, avg_vs_obs, bounds = setup_scene(n_layers)
+    true_model, _, phase_vel_obs, bounds = setup_scene(n_layers)
     starting_model = VelocityModel.generate_starting_model(true_model, bounds)
-    inversion = Inversion(avg_vs_obs, starting_model, bounds, n_layers)
+    inversion = Inversion(phase_vel_obs, starting_model, bounds, n_layers)
     resulting_model = inversion.run_inversion()
 
 
@@ -66,27 +66,17 @@ def plot_results():
     # save figures directly to folder
     # plot density
 
-    true_model, avg_vs_true, avg_vs_obs, bounds = setup_scene(n_layers=10)
+    true_model, phase_vel_true, phase_vel_obs, bounds = setup_scene(n_layers=10)
 
     # periods = np.linspace(1, 100, 100)  # unit
     # freqs = 1 / periods
 
     # pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
 
-    plot_model_setup(true_model, avg_vs_true, avg_vs_obs, bounds)
-    # plot density
-    # plot true model with and without noise
-
-    # plot_velocity_profile(prior_model, periods)
-
-    # plot_model_setup(prior_model.velocity_model)
-
-    # plot_depth(periods, pd_rayleigh.velocity)
-
-    # make simulated data, save to csv
+    plot_model_setup(true_model, phase_vel_true, phase_vel_obs, bounds)
 
 
-def plot_model_setup(velocity_model, avg_vs_true, avg_vs_obs, bounds):
+def plot_model_setup(velocity_model, phase_vel_true, phase_vel_obs, bounds):
     # plot velocity_model
     # thickness, Vp, Vs, density
     # km, km/s, km/s, g/cm3

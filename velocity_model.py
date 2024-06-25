@@ -13,14 +13,51 @@ class VelocityModel:
 
         self.density = (vel_p - density_params[0]) / density_params[1]
 
-        self.params = self.thickness  # and uncertainty?
+        self.params = np.concatenate(self.thickness, self.vel_s)
         self.n_params = len(self.params)
+        self.n_data = self.n_params  # * difference between n params and n data?
 
         self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
         self.vel_rayleigh = None
 
-        # self.pcsd = 1 / 20
-        # self.u = np.eye(n_params)
+        self.pcsd = 1 / 20  # PC standard deviation
+        self.u = np.eye(self.n_params)
+
+        # convergence params *try to simplify
+        self.ncov = 0  # initialize the dividing number for covarianve
+        self.cov_mat_sum = np.zeros(
+            (self.n_params, self.n_params)
+        )  # initialize covariance matrix sum
+        self.cov_mat = np.zeros(
+            (self.n_params, self.n_params)
+        )  # initialize covariance matrix, 3 dimmensions with Nchain
+        self.mean_sum = np.zeros(
+            (self.n_params)
+        )  # initiazlize parameter mean vector: becareful with the dimension of Nx1 vs just N (a vector)
+
+        hist_m = np.zeros(
+            (self.n_bins + 1, self.n_params)
+        )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
+        mnew = np.zeros(self.n_params)
+        mcur = np.zeros(self.n_params)
+        mbar = np.zeros(self.n_params)
+        dnew = np.zeros(self.n_params)
+        dcur = np.zeros(self.n_data)
+
+        """
+        R = np.zeros(
+            (Npar, Npar, Nchain), dtype=float
+        )  # initialize correlation matrix, 3 dimmensions with Nchain
+        R[:, :, 1] = R[:, :, 1] + 1.0
+        """
+
+        R = np.zeros(
+            (self.n_params, self.n_params)
+        )  # initialize correlation matrix, 3 dimmensions with Nchain
+        R[:, :, 1] = R[:, :, 1] + 1.0
+
+        # counting indices
+        self.rotation_ind = 0
 
     def forward_model(freqs, velocity_model):
         """
@@ -50,27 +87,6 @@ class VelocityModel:
         density_params = np.polyfit(radius, prem_density, deg=1)
         # returns [-1.91018882e-03  1.46683536e+04]
 
-    def get_vel_s_profile(self, freq, vel_rayleigh):
-        # get wavelength from frequency
-        wavelength_rayleigh = vel_rayleigh / freq  # CHECK UNITS
-
-        # get depth from wavelength
-        depths = wavelength_rayleigh
-
-        # get vel_s depth profile
-        vel_s = [vel_rayleigh[0]]
-        vel_s_avgs = [vel_rayleigh[0]]
-        total_avg = vel_rayleigh[0]
-
-        for i in range(1, len(vel_rayleigh)):
-            new_vel = (vel_rayleigh[i] - total_avg) / depths[
-                i
-            ]  # CHECK IF DEPTHS ARE ORDERED
-            vel_s.append(new_vel)
-            total_avg += new_vel
-
-        return depths, vel_s
-
     def generate_true_model(
         n_layers, layer_bounds, poisson_ratio, density_params, sigma_pd
     ):
@@ -83,7 +99,7 @@ class VelocityModel:
         # generate layer thicknesses
         thickness = np.random.uniform(
             layer_bounds[0], layer_bounds[1], n_layers
-        )  # change to gaussian
+        )  # validate that this is uniform
         # this is setting the depth to be the bottom of each layer ***
         depth = np.cumsum(thickness)
         radius = prem['radius[unit="m"]'] / 1000  # m -> km
@@ -150,14 +166,11 @@ class VelocityModel:
         return starting_model
 
     def perturb_model(self, bounds, layer_bounds, u, pcsd, scale_factor=1.3):
-
         # self is current best model
-        # current_params = self.params
-        thickness = self.thickness
-        n_params = len(thickness)  # unless there are uncertainties too
+        current_params = self.params
 
         # normalizing, rotating
-        test_params = (thickness - layer_bounds[0]) / layer_bounds[2]
+        test_params = (current_params - layer_bounds[0]) / layer_bounds[2]
         test_params = np.matmul(np.transpose(u), test_params)
 
         # generate params to try; Cauchy proposal
@@ -171,19 +184,15 @@ class VelocityModel:
         test_params = np.matmul(u, test_params)
         test_params = layer_bounds[0] + (test_params * layer_bounds[2])
 
-        # perturb each parameter in the model
-
         # loop over params and perturb
-        for ind in range(n_params):
+        for ind in range(self.n_params):
             # validate test params
             if not VelocityModel.validate_params(test_params[ind], bounds):
                 continue
 
-            # calculate new vel_s from new generated thicknesses
-
             # calculate new likelihood
             logL_new = VelocityModel.get_likelihood(
-                pd_rayleigh, pd_rayleigh_obs, n_params, sigma_pd_rayleigh
+                pd_rayleigh, pd_rayleigh_obs, self.n_params, sigma_pd_rayleigh
             )
 
             # Compute likelihood ratio in log space:
@@ -191,7 +200,7 @@ class VelocityModel:
             xi = np.random.rand(1)
             # Apply MH criterion (accept/reject)
             if xi <= np.exp(dlogL):
-                self.logL = logLnew
+                self.logL = logL_new
                 self.params = test_params  # validate this
                 # self.vel_rayleigh =
 
