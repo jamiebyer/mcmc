@@ -11,17 +11,17 @@ from velocity_model import VelocityModel
 # - figures folder
 # - add tests
 # - fix linters
+# - docstrings and references to papers
 
 
 def setup_scene(
-    n_layers,
+    freqs,
+    sigma_pd,
     poisson_ratio=0.265,
     density_params=[-1.91018882e-03, 1.46683536e04],
-    sigma_pd=0.0001,
-    pcsd=0.05,
 ):
     """
-    Define variables for initialization.
+    Define bounds, frequencies. Create true model and observed data.
     """
 
     # Bounds of search (min, max)
@@ -33,18 +33,15 @@ def setup_scene(
         "sigma_pd": [0, 1],
     }
     # Initial velocity model
-
+    n_freqs = len(freqs)
     true_model = VelocityModel.generate_true_model(
-        n_layers, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
+        n_freqs, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
     )
 
-    # define freqs from layer thickness
-    period = np.linspace(1, 100, 10)
-    freqs = 3 * 1 / period
     pd_rayleigh = VelocityModel.forward_model(freqs, true_model.velocity_model)
     # add noise
     phase_vel_true = pd_rayleigh.velocity
-    phase_vel_obs = phase_vel_true + sigma_pd * np.random.randn(n_layers)
+    phase_vel_obs = phase_vel_true + sigma_pd * np.random.randn(n_freqs)
 
     return true_model, phase_vel_true, phase_vel_obs, bounds
 
@@ -53,10 +50,16 @@ def run(n_layers=10):
     """
     Run inversion.
     """
-    true_model, _, phase_vel_obs, bounds = setup_scene(n_layers)
-    starting_model = VelocityModel.generate_starting_model(true_model, bounds)
-    inversion = Inversion(phase_vel_obs, starting_model, bounds, n_layers)
-    resulting_model = inversion.run_inversion()
+    n_chains = 2
+    sigma_pd = 0.0001
+    periods = np.linspace(1, 100, 100)  # unit
+    freqs = 1 / periods
+    true_model, _, phase_vel_obs, bounds = setup_scene(freqs, n_layers, sigma_pd)
+    chains = VelocityModel.generate_starting_models(
+        n_chains, freqs, true_model, phase_vel_obs, bounds, sigma_pd
+    )
+    inversion = Inversion(phase_vel_obs, chains, bounds, n_layers)
+    inversion.run_inversion(freqs, bounds, sigma_pd)
 
 
 def plot_results():
@@ -66,7 +69,7 @@ def plot_results():
     # save figures directly to folder
     # plot density
 
-    true_model, phase_vel_true, phase_vel_obs, bounds = setup_scene(n_layers=10)
+    true_model, phase_vel_true, phase_vel_obs, bounds = setup_scene()
 
     # periods = np.linspace(1, 100, 100)  # unit
     # freqs = 1 / periods
@@ -136,4 +139,5 @@ def plot_depth(periods, vel):
 
 
 if __name__ == "__main__":
-    plot_results()
+    run()
+    # plot_results()

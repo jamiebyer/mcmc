@@ -1,34 +1,30 @@
 import numpy as np
+import pandas as pd
 
 
 class Inversion:
     def __init__(
         self,
-        avg_vs_obs,
-        starting_model,
+        phase_vel_obs,
+        chains,
         bounds,
-        n_layers,
-        n_chains=2,
+        n_freqs,
         n_burn=10000,  # index for burning
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
-        n_bins=200,
     ):
-        # TODO:
-        # add in burning, keeping, rotation indices.
         """ """
-        self.avg_vs_obs = avg_vs_obs
+        self.phase_vel_obs = phase_vel_obs
         self.bounds = bounds
-        self.n_layers = n_layers
-        self.n_chains = n_chains
+        self.n_freqs = n_freqs
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of random walks
-        self.n_bins = n_bins
 
-        self.chains = np.fill(n_chains, starting_model)
-        self.logL = np.zeros(n_chains)
+        self.chains = chains
+        self.n_chains = len(self.chains)
+        self.logL = np.zeros(self.n_chains)
 
         # make vector form of bounds
         self.bounds = list(bounds.values())  # should maintain order
@@ -38,69 +34,35 @@ class Inversion:
             self.bounds, (self.bounds[1, :] - self.bounds[0, :]), axis=0
         )  # verify this!
 
-        hist_m = np.zeros(
-            (self.n_bins + 1, Npar, Nchain), dtype=float
-        )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
-        mnew = np.zeros((Npar, Nchain), dtype=float)
-        mcur = np.zeros((Npar, Nchain), dtype=float)
-        mbar = np.zeros((Npar, Nchain), dtype=float)
-        dnew = np.zeros((Ndat, Nchain), dtype=float)
-        # initialize dnew using both Vp and Vs
-        dcur = np.zeros((Ndat, Nchain), dtype=float)
-        # initialize dcur using both Vp and Vs
-
-        correlation_mat = np.zeros(
-            (self.n_layers, self.n_layers, self.n_chains), dtype=float
-        )
-        correlation_mat[:, :, 1] += 1
-
-    def run_inversion(self, lin_rot=True):
-        # instead of lin_rot, use a PC package ??
-        if lin_rot:  # ...
+    def run_inversion(self, freqs, bounds, sigma_pd, lin_rot=True):
+        if lin_rot:
             for chain_model in self.chains:
-                chain_model.lin_rot()
+                chain_model.lin_rot(freqs, bounds, sigma_pd)
 
         # mcmc random walk
-        resulting_model = self.random_walk()
+        self.random_walk()
 
-        # ...
-
-    def calculate_covariance_matrix(self, model_cur, covariance_matrix, rotation: bool):
-        """
-        np.cov: A 1-D or 2-D array containing multiple variables and observations.
-        Each row of m represents a variable, and each column a single observation of all those variables.
-        """
-
-        # normalizing
-        mw = (model_cur - self.bounds[0, :]) / self.bounds[2, :]
-
-        model_cur.mean_sum += mw  # calculating the sum of mean(m)
-
-        model_cur.ncov += 1
-
-        mbar[:, ichain] = mmsum[:, ichain] / model_cur.ncov
-
-        mcsum[:, :, ichain] = mcsum[:, :, ichain] + np.outer(
-            np.transpose(mw - mbar[:, ichain]), mw - mbar[:, ichain]
-        )
-
-        Cov[:, :, ichain] = (
-            mcsum[:, :, ichain] / model_cur.ncov
-        )  # calculating covariance matrix
-        for ipar in range(self.n_params):
-            for jpar in range(Npar):
-                covariance_matrix[ipar, jpar, ichain] = Cov[
-                    ipar, jpar, ichain
-                ] / np.sqrt(Cov[ipar, ipar, ichain] * Cov[jpar, jpar, ichain])
-        # rotation
-        if rotation:
-            u[:, :, ichain], s, vh = np.linalg.svd(
-                Cov[:, :, ichain]
-            )  # rotate it to its Singular Value Decomposition
-            pcsd[:, ichain] = np.sqrt(s)
-
-    def random_walk(self, cconv=0.3):
+    def random_walk(
+        self,
+        cconv=0.3,
+        n_burn_in=10000,  # index for burning
+        n_keep=2000,  # index for writing it down
+        n_chain_thin=10,
+        n_after_rot=40000,  # Do at least N_AFTER_ROT steps after nonlinear rotation started
+    ):
+        # initialize saved results on model (maybe should be under velocity_model?)
+        for chain_model in self.chains:
+            chain_model.saved_results = {
+                "logL": np.zeros(n_keep),
+                "m": np.zeros(n_keep),
+                "d": np.zeros(n_keep),
+                "acc": np.zeros(n_keep),
+            }
         # move correlation matrix to velocity model
+        correlation_mat = np.zeros(
+            (self.n_fr, self.n_layers, self.n_chains), dtype=float
+        )
+        correlation_mat[:, :, 1] += 1
         c_diff = np.max(
             np.max(
                 np.abs(self.correlation_mat[:, :, 0] - self.correlation_mat[:, :, 1])
@@ -111,112 +73,90 @@ class Inversion:
             rotation = True
 
         save_cov_mat = False
-        for i in range(self.n_mcmc):
+        for n_steps in range(self.n_mcmc):
             # rotation ind should prolly be on inversion class
 
-            if n_steps > NBURNIN and rotation is False:
+            if n_steps > n_burn_in and rotation is False:
                 rotation = True
-                n_steps = 0
-            if n_steps > NKEEP and rotation is True:
+            if n_steps > n_keep + n_burn_in:
                 save_cov_mat = True
-                n_steps = 0
                 # mcsum[:, :, ichain] = 0.0
                 # mmsum[:, ichain] = 0.0
 
             # will n_steps ever need to be separate for each model
             for chain_model in self.chains:
                 chain_model.perturb_params()
-                covariance_matrix = self.calculate_covariance_matrix()
-
+                # cov mat on inversion or model class?
+                chain_model.update_covariance_matrix(self.n_params)
+                # what is cov mat used for if not saved
                 if save_cov_mat:
-                    # calculate the difference between ichain parameters
-                    # calculating histograms
-
-                    for ipar in np.arange(len(mt)):
-                        edge = np.linspace(minlim[ipar], maxlim[ipar], nbin + 1)
-                        idx_dif = np.argmin(abs(edge - mcur[ipar, ichain]))
-                        hist_m[idx_dif, ipar, ichain] += 1
+                    chain_model.get_hist()
 
                 ## Saving sample into buffer
-                if (np.mod(imcmc, NCHAINTHIN)) == 0:
-                    logLkeep2[ikeep, :] = np.append(logLcur[ichain], ichain)
-                    mkeep2[ikeep, :] = np.append(mcur[:, ichain], ichain)
-                    dkeep2[ikeep, :] = np.append(dcur[:, ichain], ichain)
-                    acc[ikeep, :] = np.append(
-                        float(iacc[ichain, 0]) / float(iprop[ichain, 0]), ichain
-                    )  # Using a stride concept: first row is when ichain = 0
-                    # print((iacc[ichain,:]).astype(float)/(iprop[ichain,:]).astype(float))
-                    if imcmc >= NBURNIN:
+                if (np.mod(n_steps, n_chain_thin)) == 0:
+                    chain_model.saved_results["logL"][ikeep] = chain_model.logL
+                    chain_model.saved_results["m"][ikeep] = chain_model.params
+                    # saved_results["d"][ikeep, ichain] = chain_model.logL
+                    chain_model.saved_results["acc"][ikeep] = float(
+                        iacc[ichain, 0]
+                    ) / float(iprop[ichain, 0])
+
+                    if imcmc >= n_burn_in:
                         ikeep += 1  # keeping track of the idex to write into a file
 
-                n_steps += 1
+            # SUBTRACTING 2 NORMALIZED HISTOGRAM
+            if imcmc > n_burn_in:  # after burning period
+                rotate = i_after_rot > n_after_rot
+                self.check_convergence(self.chains, n_burn_in, n_after_rot, rotate)
 
-    def check_convergence():
+    def check_convergence(chains, n_burn_in, n_after_rot, rotate, hist_conv=0.05):
+        out_dir = "./out/"
+
         # SUBTRACTING 2 NORMALIZED HISTOGRAM
-        if imcmc > NBURNIN:  # after burning period
-            hist_dif = (
-                np.abs(
-                    hist_m[:, :, 0] / hist_m[:, :, 0].max()
-                    - hist_m[:, :, 1] / hist_m[:, :, 1].max()
-                )
-            ).max()  # find the max of abs of the difference between 2 models
-            if (hist_dif < hconv) & (i_after_rot > N_AFTER_ROT):
-                print("Nchain models have converged, terminating.")
-                print("imcmc: " + str(imcmc))
+        # find the max of abs of the difference between 2 models
+        # how to determine convergence with more than 2 chains?
 
-                df = pd.DataFrame(logLkeep2, columns=["logLkeep2", "ichain"])
+        # right now hard-coded for 2 chains
+        hist_diff = (
+            np.abs(
+                chains[0].hist_m / chains[0].hist_m.max()
+                - chains[1].hist_m / chains[1].hist_m.max()
+            )
+        ).max()
+
+        if (hist_diff < hist_conv) & rotate:
+
+            # print("Nchain models have converged, terminating.")
+            # print("imcmc: " + str(imcmc))
+
+            # collect results
+            keys = ["logL", "m", "d", "acc"]
+            # logLkeep2, mkeep2, dkeep2, acc, hist_d_plot, covariance matrix
+            for key in keys():
+                df_dict = {}
+                for ind in range(len(chains)):
+                    df_dict[key] = chains[ind].saved_results[key]
+                df = pd.DataFrame(df_dict)
                 df.to_csv(
-                    out_dir + "logLkeep2_example.csv",
-                    mode="w" if (ihead == 1) else "a",
-                    header=True if (ihead == 1) else False,
-                )  # save logLkeep2 to csv
-                df = pd.DataFrame(mkeep2, columns=np.append(mt_name, "ichain"))
-                df.to_csv(
-                    out_dir + "mkeep2_example.csv",
-                    mode="w" if (ihead == 1) else "a",
-                    header=True if (ihead == 1) else False,
-                )  # save mkeep2 to csv
-                df = pd.DataFrame(dkeep2, columns=np.append(sta_name_all, "ichain"))
-                df.to_csv(
-                    out_dir + "dkeep2_example.csv",
-                    mode="w" if (ihead == 1) else "a",
-                    header=True if (ihead == 1) else False,
-                )  # save dkeep2 to csv
-                df = pd.DataFrame(acc, columns=np.append("acc", "ichain"))
-                df.to_csv(
-                    out_dir + "acc_example.csv",
-                    mode="w" if (ihead == 1) else "a",
-                    header=True if (ihead == 1) else False,
-                )  # save acc to csv
-                df = pd.DataFrame(hist_d_plot)
-                df.to_csv(
-                    out_dir + "Conv_example.csv",
-                    mode="w" if (ihead == 1) else "a",
-                    header=True if (ihead == 1) else False,
+                    out_dir + key + ".csv",
                 )
 
-                for ichain_id in np.arange(Nchain):
-                    df = pd.DataFrame(Cov[:, :, ichain_id])
-                    df.to_csv(
-                        out_dir + "Cov_example_" + str(ichain_id) + ".csv"
-                    )  # save covariance matrix to csv
+            print("saving output files %.1d %% " % (float(imcmc) / NMCMC * 100))
+            print("Rotation is %s" % ("on" if (irot) else "off"))
+            tend = time.time()  # starting time to keep
+            print("time to converge: %s sec" % (round(tend - tstart, 2)))
 
-                print("saving output files %.1d %% " % (float(imcmc) / NMCMC * 100))
-                print("Rotation is %s" % ("on" if (irot) else "off"))
-                tend = time.time()  # starting time to keep
-                print("time to converge: %s sec" % (round(tend - tstart, 2)))
+            # TERMINATE!
+            sys.exit("Converged, terminate.")
 
-                # TERMINATE!
-                sys.exit("Converged, terminate.")
+        elif (np.mod(imcmc, 5 * n_keep)) == 0:
+            t2 = time.time()
+            print("Not converging yet; time: ", t2 - t1, "s")
+            print("imcmc: " + str(imcmc))
+            print("hist_diff: %1.3f, cov_diff: %1.3f" % (hist_diff, c_diff))
 
-            elif (np.mod(imcmc, 5 * NKEEP)) == 0:
-                t2 = time.time()
-                print("Not converging yet; time: ", t2 - t1, "s")
-                print("imcmc: " + str(imcmc))
-                print("hist_diff: %1.3f, cov_diff: %1.3f" % (hist_dif, c_diff))
-
-                hist_d_plot.append(hist_dif)
-                plt.figure(100)
-                plt.plot(hist_d_plot, "-k")
-                plt.pause(0.00001)
-                plt.draw()
+            hist_d_plot.append(hist_diff)
+            plt.figure(100)
+            plt.plot(hist_d_plot, "-k")
+            plt.pause(0.00001)
+            plt.draw()
