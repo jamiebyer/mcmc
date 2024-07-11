@@ -1,3 +1,21 @@
+
+Things that can be wiggled:
+
+Model setup:
+- n_layers
+- n_data
+- model_depth
+- sigma_pd
+- poisson_ratio
+- density_params
+
+
+Inversion params:
+- bounds on each parameter (p, s velocity, density, layer thickness)
+
+
+-------
+
 - checking convergence with more than 2 chains?
 - uncertainties
 - density birch params

@@ -12,52 +12,83 @@ from velocity_model import VelocityModel
 # - add tests
 # - fix linters
 # - docstrings and references to papers
+# - alphabetize or organize function order
+# - check variable names, rename u, pcsd
+# - cauchy proposal...
+# - maybe add getters for like velocity model
+# - distinguish n_params, n_data
+# - add logging
 
 
 def setup_scene(
-    freqs,
+    n_layers,
+    n_data,
+    model_depth,
     sigma_pd,
     poisson_ratio=0.265,
     density_params=[-1.91018882e-03, 1.46683536e04],
 ):
     """
-    Define bounds, frequencies. Create true model and observed data.
+    Define parameter bounds, frequencies. Create simulated true model and observed data.
+
+    :param n_layers: Number of layers in model.
+    :param n_data: Number of simulated observed data.
+    :param model_depth: Total depth of model. (m)
+    :param sigma_pd: Initial estimate for uncertainty in phase velocity.
+    :param poisson_ratio:
+    :density_params: Birch parameters to use for initial density profile.
     """
 
     # Bounds of search (min, max)
-    # density bounds
     bounds = {
         "layer_thickness": [5, 15],
-        "v_p": [3, 7],
-        "v_s": [2, 6],
+        "vel_p": [3, 7],
+        "vel_s": [2, 6],
+        "density": [2, 6],
         "sigma_pd": [0, 1],
     }
-    # Initial velocity model
-    n_freqs = len(freqs)
-    true_model = VelocityModel.generate_true_model(
-        n_freqs, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
+
+    # *** how would this data be collected? what is the spacing between frequencies? ***
+    # frequencies for simulated observed data
+    freqs = np.linspace(400, 1600, n_data)  # (Hz)
+
+    # generate true model
+    true_model = TrueModel(
+        n_data, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
     )
 
-    pd_rayleigh = VelocityModel.forward_model(freqs, true_model.velocity_model)
-    # add noise
-    phase_vel_true = pd_rayleigh.velocity
-    phase_vel_obs = phase_vel_true + sigma_pd * np.random.randn(n_freqs)
+    return (
+        bounds,
+        true_model,
+        freqs,
+    )
 
-    return true_model, phase_vel_true, phase_vel_obs, bounds
 
-
-def run(n_layers=10):
+def run(
+    n_chains=2,
+    n_data=10,
+    n_layers=10,
+    model_depth=20,
+    sigma_pd=0.0001,
+):
     """
     Run inversion.
+
+    :param n_chains: Number of parallel chains to use in parallel tempering.
+    :param n_data: Number of simulated data to use.
+    :param n_layers: Number of layers in the model.
+    :param model_depth: Total depth of model. (m)
+    :param sigma_pd: Starting uncertainty for phase velocity data.
     """
-    n_chains = 2
-    sigma_pd = 0.0001
-    periods = np.linspace(1, 100, 100)  # unit
-    freqs = 1 / periods
+
+    # declare parameters needed for inversion; generate true model
     true_model, _, phase_vel_obs, bounds = setup_scene(freqs, n_layers, sigma_pd)
+
+    # *** starting models should be generate within inversion. currently they are generated from the true model... how should they be generated? ***
     chains = VelocityModel.generate_starting_models(
         n_chains, freqs, true_model, phase_vel_obs, bounds, sigma_pd
     )
+    # run inversion
     inversion = Inversion(phase_vel_obs, chains, bounds, n_layers)
     inversion.run_inversion(freqs, bounds, sigma_pd)
 

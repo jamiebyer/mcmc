@@ -1,6 +1,8 @@
 import numpy as np
 import pandas as pd
 import sys
+from mpi4py import MPI
+import pickle
 
 
 class Inversion:
@@ -28,6 +30,9 @@ class Inversion:
         self.logL = np.zeros(self.n_chains)
         self.hist_diff_plot = []
 
+        self.swap_acc = 1
+        self.swap_prop = 1
+
         # make vector form of bounds
         self.bounds = list(bounds.values())  # should maintain order
         # add range as a third column
@@ -36,16 +41,95 @@ class Inversion:
             self.bounds, (self.bounds[1, :] - self.bounds[0, :]), axis=0
         )  # verify this!
 
-    def run_inversion(self, freqs, bounds, sigma_pd, lin_rot=True):
-        if lin_rot:
+    def schedule_tempering(self, rank, dTlog=1.15):
+        # Parallel tempering schedule:
+        n_chains_frac = int(np.ceil(self.n_chains / 4))
+        n_temps = self.n_chains - n_chains_frac + 1
+        Nchaint = np.zeros(n_temps, dtype=int)
+        beta_pt = np.zeros(self.n_chains, dtype=float)
+        Nchaint[:] = 1
+        Nchaint[0] = n_chains_frac
+
+        for it in range(n_temps):
+            for ic in range(Nchaint[it]):
+                for it2 in range(n_temps):
+                    beta_pt[it2] = 1.0 / dTlog ** float(it)
+                    # T = 1.0 / beta_pt[it2]
+
+        if rank == 0:
+            # master
+            beta_chain = 1.0
+        else:
+            # worker
+            beta_chain = beta_pt[rank - 1]
+
+    def run_inversion(self, freqs, bounds, sigma_pd):
+        # setup
+        comm = MPI.COMM_WORLD
+        rank = comm.Get_rank()
+        status = MPI.Status()
+
+        self.schedule_tempering()
+
+        comm.Barrier()
+
+        if rank == 0:
+            # split into functions
+            # master
+            for n_steps in np.arange(self.n_mcmc):
+                ## Receive from workers
+                source_1 = status.source
+                comm.Recv(
+                    received_chains,
+                    source=MPI.ANY_SOURCE,
+                    tag=MPI.ANY_TAG,
+                    status=status,
+                )
+                comm.Recv(prop_acc, source=source_1, tag=MPI.ANY_TAG)
+
+                prop[source_1 - 1, :] = prop_acc[0, :]
+                acc[source_1 - 1, :] = prop_acc[1, :]
+
+                comm.Recv(
+                    received_chains,
+                    source=MPI.ANY_SOURCE,
+                    tag=MPI.ANY_TAG,
+                    status=status,
+                )
+                source_2 = status.source
+                comm.Recv(prop_acc, source=source_2, tag=MPI.ANY_TAG)
+
+                prop[source_2 - 1, :] = ipropacc[0, :]
+                acc[source_2 - 1, :] = ipropacc[1, :]
+
+                ## Tempering exchange move
+                self.perform_tempering_swap()
+
+                ## Sending back to workers after swap
+                for chain in received_chains:
+                    msend = np.append(np.array([logLpair[0], betapair[0]]), mpair[:, 0])
+                    comm.Send(msend, dest=isource0, tag=rank)
+
+                msend = np.append(np.array([logLpair[0], betapair[0]]), mpair[:, 0])
+                comm.Send(msend, dest=source_1, tag=rank)
+                msend = np.append(np.array([logLpair[1], betapair[1]]), mpair[:, 1])
+                comm.Send(msend, dest=source_2, tag=rank)
+
+                self.check_convergence()
+
+        else:
+            # worker
+            # lin_rot
+            # is lin_rot just for an initial u, pscd?
             for chain_model in self.chains:
                 chain_model.lin_rot(freqs, bounds, sigma_pd)
-
-        # mcmc random walk
-        self.random_walk()
+            # mcmc random walk
+            self.random_walk(comm, status)
 
     def random_walk(
         self,
+        comm,
+        status,
         n_chain_thin=10,
         cconv=0.3,
     ):
@@ -79,13 +163,13 @@ class Inversion:
 
         for n_steps in range(self.n_mcmc):
             # for parallel, receive info from workers
-            """
-            ##
             ## Receive from workers
-            ##
             comm.Recv(msend, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
             isource0 = status.source
             comm.Recv(ipropacc, source=isource0, tag=MPI.ANY_TAG)
+
+            received_chains = pickle.loads(msend)
+
             mpair[:, 0] = msend[2:]
             logLpair[0] = msend[0]
             betapair[0] = msend[1]
@@ -93,17 +177,6 @@ class Inversion:
             # print('isource0',isource0,msend)
             prop[isource0 - 1, :] = ipropacc[0, :]
             acc[isource0 - 1, :] = ipropacc[1, :]
-
-            comm.Recv(msend, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-            isource1 = status.source
-            comm.Recv(ipropacc, source=isource1, tag=MPI.ANY_TAG)
-            mpair[:, 1] = msend[2:]
-            logLpair[1] = msend[0]
-            betapair[1] = msend[1]
-            # print('isource1',isource1,msend)
-            prop[isource1 - 1, :] = ipropacc[0, :]
-            acc[isource1 - 1, :] = ipropacc[1, :]
-            """
 
             # after n_burn_in steps, start using PC rotation for model
             # do n_burn_in steps before saving models; this is used to determine good sampling spacing
@@ -117,68 +190,76 @@ class Inversion:
                 # mcsum[:, :, ichain] = 0.0
                 # mmsum[:, ichain] = 0.0
 
-            for chain_model in self.chains:
-                chain_model.perturb_params()
+            for chain_model in received_chains:
+                # maybe perturb_params should be on inversion class?
+                # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
+                chain_model.perturb_params(
+                    self.bounds, self.layer_bounds, self.phase_vel_obs
+                )
                 # cov mat on inversion or model class?
                 chain_model.update_covariance_matrix(self.n_params)
                 # what is cov mat used for if not saved
                 if save_cov_mat:
                     chain_model.get_hist()
 
-                ## Saving sample into buffer
-                if (np.mod(n_steps, n_chain_thin)) == 0:
-                    chain_model.saved_results["logL"][self.ikeep] = chain_model.logL
-                    chain_model.saved_results["m"][ikeep] = chain_model.params
-                    # saved_results["d"][ikeep, ichain] = chain_model.logL
-                    chain_model.saved_results["acc"][self.ikeep] = float(
-                        iacc[ichain, 0]
-                    ) / float(iprop[ichain, 0])
+                ## Sending model to Master
+                # can I send an object through here
+                # msend = np.append(np.array([logLcur, beta_chain]), mcur)
 
-                    if self.imcmc >= self.n_burn_in:
-                        self.ikeep += (
-                            1  # keeping track of the idex to write into a file
-                        )
-            self.perform_tempering_swap()
-            self.check_convergence(n_steps)
-            self.save_samples(n_steps)
+                comm.Send(pickle.dumps(received_chains), dest=0, tag=rank)
+                comm.Send(self.prop_acc, dest=0, tag=rank)
+
+                ## Receiving back from Master
+                comm.Recv(msend, source=0, tag=MPI.ANY_TAG)
+                mcur = msend[2:]
+                logLcur = msend[0]
+
+                if self.imcmc >= self.n_burn_in:
+                    self.ikeep += 1  # keeping track of the idex to write into a file
 
     def perform_tempering_swap(self):
-        ##
         ## Tempering exchange move
-        ##
-        # print('pair0',mpair[:,0])
-        # print('pair1',mpair[:,1])
-        if betapair[0] != betapair[1]:
-            betaratio = betapair[1] - betapair[0]
-            # print('swap',betapair[1],betapair[0],betaratio,logLpair[0],logLpair[1],logLpair[0]-logLpair[1])
-            logratio = betaratio * (logLpair[0] - logLpair[1])
-            xi = np.random.rand(1)
-            # print('logratio',xi,logratio,np.exp(logratio))
-            if xi <= np.exp(logratio):
-                ## ACCEPT SWAP
-                #    PRINT*,'ACCEPTED',EXP(logratio*betaratio),ran_uni2
-                #    WRITE(ulog,204)'ic1:',ic1idx,obj(ic1idx)%k,logP1,obj(ic1idx)%logL,logratio,betaratio,EXP(logratio*betaratio),ran_uni2
-                #    WRITE(ulog,204)'ic2:',ic2idx,obj(ic2idx)%k,logP2,obj(ic2idx)%logL
-                mpair[:, [0, 1]] = mpair[:, [1, 0]]
-                # print('accept')
-                if (betapair[0] == 1.0) | (betapair[1] == 1.0):
-                    swapacc = swapacc + 1
-            if (betapair[0] == 1.0) | (betapair[1] == 1.0):
-                swapprop = swapprop + 1
-        ## Sending back to workers after swap
-        # print('pair0',mpair[:,0])
-        # print('pair1',mpair[:,1])
-        msend = np.append(np.array([logLpair[0], betapair[0]]), mpair[:, 0])
-        comm.Send(msend, dest=isource0, tag=rank)
-        msend = np.append(np.array([logLpair[1], betapair[1]]), mpair[:, 1])
-        comm.Send(msend, dest=isource1, tag=rank)
+        # following: https://www.cs.ubc.ca/~nando/540b-2011/projects/8.pdf
+
+        for ind in range(len(self.chains) - 1):
+            # swap temperature neighbours with probability
+            # look to see if there's a better way to do more than 2 chains!
+
+            # At a given Monte Carlo step we can update the global system by swapping the
+            # configuration of the two systems, or alternatively trading the two temperatures.
+            # The update is accepted according to the Metropolis–Hastings criterion with probability
+            temp_1 = self.chains[ind].temperature
+            temp_2 = self.chains[ind + 1].temperature
+
+            if temp_1 != temp_2:
+                temp_ratio = temp_2 - temp_1
+
+                logL_1 = self.chains[ind].logL
+                logL_2 = self.chains[ind + 1].logL
+
+                logratio = temp_ratio * (logL_1 - logL_2)
+                xi = np.random.rand(1)
+                if xi <= np.exp(logratio):
+                    ## ACCEPT SWAP
+                    # swap temperatures and order in list of chains? chains should be ordered by temp
+
+                    if temp_1 == 1 or temp_2 == 1:
+                        self.swap_acc += 1
+
+                # swapprop and swapacc are for calculating swap rate....
+                if temp_1 == 1 or temp_2 == 1:
+                    self.swap_prop += 1
 
     def check_convergence(self, n_steps, hist_conv=0.05, out_dir="./out/"):
-
-        # SUBTRACTING 2 NORMALIZED HISTOGRAM
         # do at least n_after_rot steps after starting rotation before model can converge
-        rotate = n_steps > (self.n_burn_in + self.n_after_rot)
-        save_hist = (np.mod(self.imcmc, 5 * self.n_keep)) == 0
+        enough_rotations = n_steps > (self.n_burn_in + self.n_after_rot)
+
+        # only save after burn-in
+        if n_steps > self.n_burn_in:
+            save_hist = False
+        else:
+            # save a subset of the models
+            save_hist = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
         # SUBTRACTING 2 NORMALIZED HISTOGRAM
         # find the max of abs of the difference between 2 models
@@ -190,11 +271,7 @@ class Inversion:
             )
         ).max()
 
-        # check for convergence
-        if (hist_diff < hist_conv) & rotate:
-            # print("Nchain models have converged, terminating.")
-            # print("imcmc: " + str(imcmc))
-
+        if (hist_diff < hist_conv) & enough_rotations:
             # collect results
             keys = ["logL", "m", "d", "acc"]
             # logLkeep2, mkeep2, dkeep2, acc, hist_d_plot, covariance matrix
@@ -207,33 +284,19 @@ class Inversion:
                     out_dir + key + ".csv",
                 )
 
-            # print("saving output files %.1d %% " % (float(imcmc) / NMCMC * 100))
-            # print("Rotation is %s" % ("on" if (irot) else "off"))
-            # tend = time.time()  # starting time to keep
-            # print("time to converge: %s sec" % (round(tend - tstart, 2)))
-
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
+        ## Saving sample into buffers
         if save_hist:
-            # t2 = time.time()
-            # print("Not converging yet; time: ", t2 - t1, "s")
-            # print("imcmc: " + str(imcmc))
-            # print("hist_diff: %1.3f, cov_diff: %1.3f" % (hist_diff, c_diff))
-
             self.hist_diff_plot.append(hist_diff)
-            # plt.figure(100)
-            # plt.plot(hist_d_plot, "-k")
-            # plt.pause(0.00001)
-            # plt.draw()
+            self.save_samples(n_steps)
 
     def save_samples():
         """
         Write out to csv in chunks of size n_keep.
         """
-        ##
         ## Saving sample into buffers
-        ##
         if betapair[0] == 1.0:
             logLkeep2[ikeep, :] = np.append(logLpair[0], betapair[0])
             mkeep2[ikeep, :] = np.append(mpair[:, 0], isource0)
@@ -252,40 +315,7 @@ class Inversion:
             ).astype(float)
             # print(imcmc,isource0,betapair[1])
             ikeep += 1
-        #        #SUBTRACTING 2 NORMALIZED HISTOGRAM
-        #        if (imcmc > Nburnin): # Save after burn-in
-        #            hist_dif=((np.abs(hist_m[:,:,0]/hist_m[:,:,0].max()-hist_m[:,:,1]/hist_m[:,:,1].max())).max()) #find the max of abs of the difference between 2 models
-        #            if (hist_dif < hconv) & (i_after_rot > N_AFTER_ROT):
-        #                print('Nchain models have converged, terminating.')
-        #                print('imcmc: '+str(imcmc))
-        #
-        #                df=pd.DataFrame(logLkeep2,columns=['logLkeep2','ichain'])
-        #                df.to_csv(out_dir+"logLkeep2_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False) #save logLkeep2 to csv
-        #                df = pd.DataFrame(mkeep2,columns=np.append(mt_name,'ichain'))
-        #                df.to_csv(out_dir+"mkeep2_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False) #save mkeep2 to csv
-        #                df=pd.DataFrame(dkeep2,columns=np.append(sta_name_all,'ichain'))
-        #                df.to_csv(out_dir+"dkeep2_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False) #save dkeep2 to csv
-        #                df=pd.DataFrame(acc,columns=np.append('acc','ichain'))
-        #                df.to_csv(out_dir+"acc_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False) #save acc to csv
-        #                df=pd.DataFrame(hist_d_plot)
-        #                df.to_csv(out_dir+"Conv_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False)
-        #
-        #                for ichain_id in np.arange(Nchain):
-        #                    df=pd.DataFrame(Cov[:,:,ichain_id])
-        #                    df.to_csv(out_dir+"Cov_example_"+str(ichain_id)+".csv") #save covariance matrix to csv
-        #
-        #                print("saving output files %.1d %% "%(float(imcmc)/NMCMC*100))
-        #                print('Rotation is %s'%('on' if (irot) else 'off') )
-        #                tend=time.time() #starting time to keep
-        #                print('time to converge: %s sec'%(round(tend-tstart,2)))
-        #
-        #                #TERMINATE!
-        #                sys.exit('Converged, terminate.')
-        #
-        #            elif (np.mod(imcmc,5*NKEEP)) == 0:
-        #                t2 = time.time()
-        #                print('Runtime: ',t2-t1,'s;  imcmc: '+str(imcmc),'hist_diff: %1.3f, cov_diff: %1.3f'%(hist_dif,c_diff))
-        #                hist_d_plot.append(hist_dif)
+
         #
         if ikeep >= NKEEP - 1:  # dump to a file
             df = pd.DataFrame(logLkeep2[: ikeep - 1, :], columns=["logLkeep2", "beta"])
