@@ -4,7 +4,8 @@ import pandas as pd
 from scipy import interpolate
 
 class Model:
-    def __init__(self, n_data, thickness, vel_p, vel_s, sigma_pd):
+    def __init__(self, freqs, n_data, thickness, vel_p, vel_s, sigma_pd):
+        self.freqs = freqs
         self.n_data = n_data
 
         # should velocity model and params be properties?
@@ -33,12 +34,12 @@ class Model:
     def get_velocity_model():
         pass
 
-    def forward_model(freqs, velocity_model):
+    def forward_model(freqs, model):
         """
         Get phase dispersion curve from shear velocities.
         """
         periods = 1 / freqs
-        pd = PhaseDispersion(*velocity_model)
+        pd = PhaseDispersion(*model.velocity_model)
         pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
         # ell = Ellipticity(*velocity_model.T)
 
@@ -57,43 +58,56 @@ class TrueModel(Model):
         :param sigma_pd: Uncertainty to add to simulated data.
         """
         self.initialize_model(layer_bounds, poisson_ratio, density_params, sigma_pd)
-        super().__init__(thickness, vel_p, vel_s, sigma_pd)
-        
 
+        # initialize velocity model
+        super().__init__(thickness, vel_p, vel_s, sigma_pd)
+
+        # generate simulated data and observations for the true model
+        self.create_simulated_data()
+
+    def generate_simulated_data(self):
+        """
+        generate simulated data and observations.
+        """
         # get simulated true phase dispersion
-        pd_rayleigh = self.forward_model(freqs, self.velocity_model)
+        pd_rayleigh = self.forward_model(self.freqs, self.velocity_model)
         # generate simulated observed data by adding noise to true values.
-        phase_vel_true = pd_rayleigh.velocity
+        self.phase_vel_true = pd_rayleigh.velocity
         # *** the true sigma_pd on the model should be generated? it's not the same as initial guess for the model. ***
-        phase_vel_obs = phase_vel_true + sigma_pd * np.random.randn(n_data)
+        self.phase_vel_obs = self.phase_vel_true + self.sigma_pd * np.random.randn(self.n_data)
+
 
     def initialize_model(
-        self, n_data, layer_bounds, poisson_ratio, density_params, sigma_pd
+        self, layer_bounds, poisson_ratio, density_params, sigma_pd
     ):
         """
-        :param n_data: Number of observed data to simulate.
+        generating true velocity model from PREM.
+
         :param layer_bounds: [min, max] for layer thicknesses. (m)
         :param poisson_ratio:
         :param density_params: Birch params to simulate density profile.
         :param sigma_pd: Uncertainty to add to simulated data.
         """
+
         # from PREM...
         prem = pd.read_csv("./PREM500_IDV.csv")
 
         # generate layer thicknesses
         thickness = np.random.uniform(
-            layer_bounds[0], layer_bounds[1], n_freq
+            layer_bounds[0], layer_bounds[1], self.n_data
         )  # validate that this is uniform
         # this is setting the depth to be the bottom of each layer ***
         depth = np.cumsum(thickness)
         radius = prem['radius[unit="m"]'] / 1000  # m -> km
 
+        #"""
         # interpolate density
         # prolly want the avg of each layer or something ***
         prem_density = prem['density[unit="kg/m^3"]'] / 1000  # kg/m^3 -> g/cm3
         density_func = interpolate.interp1d(radius, prem_density)
         density = density_func(depth)
-
+        #"""
+        
         # get initial vs
         # velocities are split into components
         vsh = prem['Vsh[unit="m/s"]'] / 1000  # m/s -> km/s
@@ -102,7 +116,6 @@ class TrueModel(Model):
         vs_func = interpolate.interp1d(radius, prem_vs)
         vel_s = vs_func(depth)
 
-        # ***
         # get initial vp
         vp_vs = np.sqrt((2 - 2 * poisson_ratio) / (1 - 2 * poisson_ratio))
         vel_p = vel_s * vp_vs
@@ -114,14 +127,15 @@ class TrueModel(Model):
         # vp_func = interpolate.interp1d(radius, prem_vp)
         # vp = vp_func(depth)
 
-        self.density = (vel_p - density_params[0]) / density_params[1]
+        # Birch's law
+        #self.density = (vel_p - density_params[0]) / density_params[1]
+
+        self.vel_s = vel_s
+        self.vel_p = vel_p
+        self.density = density
+        self.thickness = thickness
 
     
-
-    def get_density(vel_p, density_params):
-        # Birch's law
-        density = (vel_p - density_params[0]) / density_params[1]
-        return density
 
     def get_birch_params():
         # fit to prem
@@ -175,10 +189,11 @@ class ChainModel(Model):
         return np.all(params >= bounds[0, :]) and np.all(params <= bounds[1, :])
 
     def generate_starting_models(
-        n_chains, freqs, true_model, phase_vel_obs, bounds, sigma_pd, pcsd=0.05
+        n_chains, freqs, true_model, bounds, sigma_pd, pcsd=0.05
     ):
         """
         Loop until a valid starting model is created.
+
         """
         n_params = true_model.n_params
         chains = []
@@ -205,6 +220,10 @@ class ChainModel(Model):
         return chains
 
     def perturb_params(self, bounds, layer_bounds, phase_vel_obs, scale_factor=1.3):
+        """
+        loop over each model parameter, perturb its value, validate the value, 
+        calculate likelihood, and accept the new model with a probability.
+        """
         # self is current best model
         current_params = self.params
         current_velocity_model = self.velocity_model

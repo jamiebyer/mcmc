@@ -3,7 +3,7 @@ from inversion import Inversion
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
-from velocity_model import VelocityModel
+from velocity_model import TrueModel, ChainModel
 
 # TODO:
 # - add environment
@@ -18,6 +18,7 @@ from velocity_model import VelocityModel
 # - maybe add getters for like velocity model
 # - distinguish n_params, n_data
 # - add logging
+# - optimization
 
 
 def setup_scene(
@@ -58,9 +59,9 @@ def setup_scene(
     )
 
     return (
+        freqs,
         bounds,
         true_model,
-        freqs,
     )
 
 
@@ -82,93 +83,26 @@ def run(
     """
 
     # declare parameters needed for inversion; generate true model
-    true_model, _, phase_vel_obs, bounds = setup_scene(freqs, n_layers, sigma_pd)
+    freqs, bounds, true_model = setup_scene(n_layers, n_data, model_depth, sigma_pd)
+
+    # create freqs, data matrix to give to inversion?
+    phase_vel_obs = true_model.phase_vel_obs
 
     # *** starting models should be generate within inversion. currently they are generated from the true model... how should they be generated? ***
-    chains = VelocityModel.generate_starting_models(
-        n_chains, freqs, true_model, phase_vel_obs, bounds, sigma_pd
+    # *** move generate_starting models to inversion init ***
+    chains = ChainModel.generate_starting_models(
+        n_chains, freqs, true_model, bounds, sigma_pd
     )
     # run inversion
-    inversion = Inversion(phase_vel_obs, chains, bounds, n_layers)
-    inversion.run_inversion(freqs, bounds, sigma_pd)
-
-
-def plot_results():
-    # TODO:
-    # add units
-    # plot ellipticity
-    # save figures directly to folder
-    # plot density
-
-    true_model, phase_vel_true, phase_vel_obs, bounds = setup_scene()
-
-    # periods = np.linspace(1, 100, 100)  # unit
-    # freqs = 1 / periods
-
-    # pd_rayleigh = prior_model.get_rayleigh_phase_dispersion(periods)
-
-    plot_model_setup(true_model, phase_vel_true, phase_vel_obs, bounds)
-
-
-def plot_model_setup(velocity_model, phase_vel_true, phase_vel_obs, bounds):
-    # plot velocity_model
-    # thickness, Vp, Vs, density
-    # km, km/s, km/s, g/cm3
-
-    depth = np.cumsum(velocity_model.thickness)
-
-    plt.subplot(2, 2, 1)
-    plt.scatter(velocity_model.vel_p, depth)
-    # plt.axvline(bounds[])
-    plt.gca().invert_yaxis()
-    plt.xlabel("P wave velocity (km/s)")
-    plt.ylabel("depth (km)")
-
-    plt.subplot(2, 2, 2)
-    plt.scatter(velocity_model.vel_s, depth)
-    plt.gca().invert_yaxis()
-    plt.xlabel("S wave velocity (km/s)")
-    plt.ylabel("depth (km)")
-
-    plt.subplot(2, 2, 3)
-    plt.scatter((velocity_model.density), depth)
-    plt.ticklabel_format(style="sci", scilimits=(-2, 2))
-    plt.gca().invert_yaxis()
-    plt.xlabel("density (g/cm3)")
-    plt.ylabel("depth (km)")
-
-    plt.subplot(2, 2, 4)
-    plt.scatter(avg_vs_true, depth, label="true")
-    plt.scatter(avg_vs_obs, depth, label="obs")
-    for d in depth:
-        plt.axhline(d)
-    plt.gca().invert_yaxis()
-    plt.xlabel("avg vs observed (km/s)")
-    plt.ylabel("depth (km)")
-
-    plt.tight_layout()
-    plt.show()
-
-
-def plot_depth(periods, vel):
-    freq = 1 / periods
-
-    wavelengths = vel / freq
-
-    plt.subplot(2, 1, 1)
-    plt.scatter(freq, wavelengths)
-    plt.xlabel("frequency")
-    plt.ylabel("wavelength")
-
-    plt.subplot(2, 1, 2)
-    plt.scatter(periods, wavelengths)
-    plt.xlabel("period")
-    plt.ylabel("wavelength")
-
-    plt.tight_layout()
-    plt.show()
+    inversion = Inversion(chains, bounds, n_layers)
+    inversion.run_inversion(freqs, phase_vel_obs, bounds, sigma_pd)
 
 
 if __name__ == "__main__":
-    run()
-    # plot_results()
+    run(
+        # n_chains=2,
+        # n_data=10,
+        # n_layers=10,
+        # model_depth=20,
+        # sigma_pd=0.0001,
+    )

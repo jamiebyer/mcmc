@@ -13,6 +13,13 @@ Model setup:
 Inversion params:
 - bounds on each parameter (p, s velocity, density, layer thickness)
 
+-------
+
+Things to add
+- Anytime PT monte carlo
+- dask for parallel computing
+- >2 chains
+- PC components with library??
 
 -------
 

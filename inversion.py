@@ -8,18 +8,14 @@ import pickle
 class Inversion:
     def __init__(
         self,
-        phase_vel_obs,
         chains,
         bounds,
-        n_freqs,
         n_burn=10000,  # index for burning
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
     ):
         """ """
-        self.phase_vel_obs = phase_vel_obs
         self.bounds = bounds
-        self.n_freqs = n_freqs
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
@@ -56,12 +52,7 @@ class Inversion:
                     beta_pt[it2] = 1.0 / dTlog ** float(it)
                     # T = 1.0 / beta_pt[it2]
 
-        if rank == 0:
-            # master
-            beta_chain = 1.0
-        else:
-            # worker
-            beta_chain = beta_pt[rank - 1]
+        return beta_pt
 
     def run_inversion(self, freqs, bounds, sigma_pd):
         # setup
@@ -69,13 +60,15 @@ class Inversion:
         rank = comm.Get_rank()
         status = MPI.Status()
 
-        self.schedule_tempering()
+        beta_pt = self.schedule_tempering()
 
         comm.Barrier()
 
         if rank == 0:
             # split into functions
             # master
+            beta_chain = 1.0
+
             for n_steps in np.arange(self.n_mcmc):
                 ## Receive from workers
                 source_1 = status.source
@@ -119,6 +112,7 @@ class Inversion:
 
         else:
             # worker
+            beta_chain = beta_pt[rank - 1]
             # lin_rot
             # is lin_rot just for an initial u, pscd?
             for chain_model in self.chains:
@@ -130,7 +124,6 @@ class Inversion:
         self,
         comm,
         status,
-        n_chain_thin=10,
         cconv=0.3,
     ):
         """
@@ -145,6 +138,8 @@ class Inversion:
                 "d": np.zeros(self.n_keep),
                 "acc": np.zeros(self.n_keep),
             }
+
+        # *** is the correlation matrix even used rn? ***
         # move correlation matrix to velocity model
         correlation_mat = np.zeros(
             (self.n_fr, self.n_layers, self.n_chains), dtype=float
@@ -155,12 +150,9 @@ class Inversion:
                 np.abs(self.correlation_mat[:, :, 0] - self.correlation_mat[:, :, 1])
             )
         )
+
         rotation = False
-        if c_diff < cconv:
-            rotation = True
-
         save_cov_mat = False
-
         for n_steps in range(self.n_mcmc):
             # for parallel, receive info from workers
             ## Receive from workers
@@ -221,36 +213,43 @@ class Inversion:
         ## Tempering exchange move
         # following: https://www.cs.ubc.ca/~nando/540b-2011/projects/8.pdf
 
-        for ind in range(len(self.chains) - 1):
+        for ind in range(self.n_chains - 1):
             # swap temperature neighbours with probability
             # look to see if there's a better way to do more than 2 chains!
 
             # At a given Monte Carlo step we can update the global system by swapping the
             # configuration of the two systems, or alternatively trading the two temperatures.
             # The update is accepted according to the Metropolis–Hastings criterion with probability
-            temp_1 = self.chains[ind].temperature
-            temp_2 = self.chains[ind + 1].temperature
+            beta_1 = self.chains[ind].beta
+            beta_2 = self.chains[ind + 1].beta
 
-            if temp_1 != temp_2:
-                temp_ratio = temp_2 - temp_1
+            if beta_1 != beta_2:
+                beta_ratio = beta_2 - beta_1
 
                 logL_1 = self.chains[ind].logL
                 logL_2 = self.chains[ind + 1].logL
 
-                logratio = temp_ratio * (logL_1 - logL_2)
+                logratio = beta_ratio * (logL_1 - logL_2)
                 xi = np.random.rand(1)
                 if xi <= np.exp(logratio):
                     ## ACCEPT SWAP
                     # swap temperatures and order in list of chains? chains should be ordered by temp
 
-                    if temp_1 == 1 or temp_2 == 1:
+                    if beta_1 == 1 or beta_2 == 1:
                         self.swap_acc += 1
 
                 # swapprop and swapacc are for calculating swap rate....
-                if temp_1 == 1 or temp_2 == 1:
+                if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
 
     def check_convergence(self, n_steps, hist_conv=0.05, out_dir="./out/"):
+        """
+        check if the model has converged.
+
+        :param n_steps: number of mcmc steps that have happened.
+        :hist_conv:
+        :out_dir: path for where to save results.
+        """
         # do at least n_after_rot steps after starting rotation before model can converge
         enough_rotations = n_steps > (self.n_burn_in + self.n_after_rot)
 
@@ -287,17 +286,17 @@ class Inversion:
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
-        ## Saving sample into buffers
+        # saving sample
         if save_hist:
             self.hist_diff_plot.append(hist_diff)
             self.save_samples(n_steps)
 
-    def save_samples():
+    def save_samples(betapair):
         """
         Write out to csv in chunks of size n_keep.
         """
         ## Saving sample into buffers
-        if betapair[0] == 1.0:
+        if betapair[0] == 1:
             logLkeep2[ikeep, :] = np.append(logLpair[0], betapair[0])
             mkeep2[ikeep, :] = np.append(mpair[:, 0], isource0)
             # dkeep2[ikeep,:] = np.append(dcur[:,ichain],isource0)
@@ -306,7 +305,7 @@ class Inversion:
             ).astype(float)
             # print(imcmc,isource0,betapair[0])
             ikeep += 1
-        if betapair[1] == 1.0:
+        if betapair[1] == 1:
             logLkeep2[ikeep, :] = np.append(logLpair[1], betapair[1])
             mkeep2[ikeep, :] = np.append(mpair[:, 1], isource1)
             # dkeep2[ikeep,:] = np.append(dcur[:,ichain],isource0)
