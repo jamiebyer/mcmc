@@ -40,14 +40,21 @@ def setup_scene(
     :density_params: Birch parameters to use for initial density profile.
     """
 
+    # *** add units ***
     # Bounds of search (min, max)
-    bounds = {
+    bounds_dict = {
         "layer_thickness": [5, 15],
         "vel_p": [3, 7],
         "vel_s": [2, 6],
         "density": [2, 6],
         "sigma_pd": [0, 1],
     }
+    # bounds needs to be the same shape as params
+    layer_bounds = np.repeat(bounds_dict["layer_thickness"], n_layers)
+    vel_s_bounds = np.repeat(bounds_dict["vel_s"], n_layers)
+    param_bounds = np.concatenate(
+        (layer_bounds, vel_s_bounds, bounds_dict["sigma_pd"]), axis=1
+    )
 
     # *** how would this data be collected? what is the spacing between frequencies? ***
     # frequencies for simulated observed data
@@ -55,7 +62,7 @@ def setup_scene(
 
     # generate true model
     true_model = TrueModel(
-        n_data, bounds["layer_thickness"], poisson_ratio, density_params, sigma_pd
+        n_data, layer_bounds, poisson_ratio, density_params, sigma_pd
     )
 
     return (
@@ -89,10 +96,11 @@ def run(
     phase_vel_obs = true_model.phase_vel_obs
 
     # *** starting models should be generate within inversion. currently they are generated from the true model... how should they be generated? ***
-    # *** move generate_starting models to inversion init ***
+    # *** move generate_starting models to inversion init (and get n_keep from inversion) ***
     chains = ChainModel.generate_starting_models(
-        n_chains, freqs, true_model, bounds, sigma_pd
+        n_chains, freqs, true_model, param_bounds, sigma_pd, n_keep=200
     )
+
     # run inversion
     inversion = Inversion(chains, bounds, n_layers)
     inversion.run_inversion(freqs, phase_vel_obs, bounds, sigma_pd)

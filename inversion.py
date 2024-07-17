@@ -1,8 +1,7 @@
 import numpy as np
 import pandas as pd
 import sys
-from mpi4py import MPI
-import pickle
+import dask
 
 
 class Inversion:
@@ -29,185 +28,103 @@ class Inversion:
         self.swap_acc = 1
         self.swap_prop = 1
 
-        # make vector form of bounds
-        self.bounds = list(bounds.values())  # should maintain order
-        # add range as a third column
-        # bounds array is min, max, range for each param
-        np.append(
-            self.bounds, (self.bounds[1, :] - self.bounds[0, :]), axis=0
-        )  # verify this!
-
-    def schedule_tempering(self, rank, dTlog=1.15):
-        # Parallel tempering schedule:
-        n_chains_frac = int(np.ceil(self.n_chains / 4))
-        n_temps = self.n_chains - n_chains_frac + 1
-        Nchaint = np.zeros(n_temps, dtype=int)
-        beta_pt = np.zeros(self.n_chains, dtype=float)
-        Nchaint[:] = 1
-        Nchaint[0] = n_chains_frac
-
-        for it in range(n_temps):
-            for ic in range(Nchaint[it]):
-                for it2 in range(n_temps):
-                    beta_pt[it2] = 1.0 / dTlog ** float(it)
-                    # T = 1.0 / beta_pt[it2]
-
-        return beta_pt
-
     def run_inversion(self, freqs, bounds, sigma_pd):
-        # setup
-        comm = MPI.COMM_WORLD
-        rank = comm.Get_rank()
-        status = MPI.Status()
+        """ """
+        # is lin_rot just for an initial u, pscd?
+        for chain_model in self.chains:
+            chain_model.lin_rot(freqs, bounds, sigma_pd)
 
-        beta_pt = self.schedule_tempering()
+        # mcmc random walk
+        self.random_walk()
 
-        comm.Barrier()
+    def get_beta(self, dTlog=1.15):
+        """
+        setting values for beta to be used. the first quarter of the chains have beta=0
 
-        if rank == 0:
-            # split into functions
-            # master
-            beta_chain = 1.0
+        :param dTlog:
 
-            for n_steps in np.arange(self.n_mcmc):
-                ## Receive from workers
-                source_1 = status.source
-                comm.Recv(
-                    received_chains,
-                    source=MPI.ANY_SOURCE,
-                    tag=MPI.ANY_TAG,
-                    status=status,
-                )
-                comm.Recv(prop_acc, source=source_1, tag=MPI.ANY_TAG)
+        :return beta: inverse temperature; beta values to use for each chain
+        """
+        # *** maybe this function should be replaced with a property later***
+        # Parallel tempering schedule
+        n_temps = self.n_chains
+        # the first ~1/4 of chains have beta value of 0..?
 
-                prop[source_1 - 1, :] = prop_acc[0, :]
-                acc[source_1 - 1, :] = prop_acc[1, :]
+        n_temps_frac = int(np.ceil(self.n_chains / 4))
+        beta = np.zeros(n_temps, dtype=float)
 
-                comm.Recv(
-                    received_chains,
-                    source=MPI.ANY_SOURCE,
-                    tag=MPI.ANY_TAG,
-                    status=status,
-                )
-                source_2 = status.source
-                comm.Recv(prop_acc, source=source_2, tag=MPI.ANY_TAG)
+        inds = np.arange(n_temps_frac, n_temps)
+        beta[inds] = 1.0 / dTlog**inds
+        # T = 1.0 / beta
 
-                prop[source_2 - 1, :] = ipropacc[0, :]
-                acc[source_2 - 1, :] = ipropacc[1, :]
-
-                ## Tempering exchange move
-                self.perform_tempering_swap()
-
-                ## Sending back to workers after swap
-                for chain in received_chains:
-                    msend = np.append(np.array([logLpair[0], betapair[0]]), mpair[:, 0])
-                    comm.Send(msend, dest=isource0, tag=rank)
-
-                msend = np.append(np.array([logLpair[0], betapair[0]]), mpair[:, 0])
-                comm.Send(msend, dest=source_1, tag=rank)
-                msend = np.append(np.array([logLpair[1], betapair[1]]), mpair[:, 1])
-                comm.Send(msend, dest=source_2, tag=rank)
-
-                self.check_convergence()
-
-        else:
-            # worker
-            beta_chain = beta_pt[rank - 1]
-            # lin_rot
-            # is lin_rot just for an initial u, pscd?
-            for chain_model in self.chains:
-                chain_model.lin_rot(freqs, bounds, sigma_pd)
-            # mcmc random walk
-            self.random_walk(comm, status)
+        return beta
 
     def random_walk(
         self,
-        comm,
-        status,
         cconv=0.3,
     ):
         """
         The burn-in stage performs this search in a part of the algorithm that disregards detailed balance.
         Once burn-in is concluded, sampling with detailed balance starts and samples are recorded.
         """
-        # initialize saved results on model (maybe should be under velocity_model?)
-        for chain_model in self.chains:
-            chain_model.saved_results = {
-                "logL": np.zeros(self.n_keep),
-                "m": np.zeros(self.n_keep),
-                "d": np.zeros(self.n_keep),
-                "acc": np.zeros(self.n_keep),
-            }
-
-        # *** is the correlation matrix even used rn? ***
-        # move correlation matrix to velocity model
-        correlation_mat = np.zeros(
-            (self.n_fr, self.n_layers, self.n_chains), dtype=float
-        )
-        correlation_mat[:, :, 1] += 1
-        c_diff = np.max(
-            np.max(
-                np.abs(self.correlation_mat[:, :, 0] - self.correlation_mat[:, :, 1])
-            )
-        )
+        beta_values = self.get_beta()
 
         rotation = False
-        save_cov_mat = False
         for n_steps in range(self.n_mcmc):
-            # for parallel, receive info from workers
-            ## Receive from workers
-            comm.Recv(msend, source=MPI.ANY_SOURCE, tag=MPI.ANY_TAG, status=status)
-            isource0 = status.source
-            comm.Recv(ipropacc, source=isource0, tag=MPI.ANY_TAG)
-
-            received_chains = pickle.loads(msend)
-
-            mpair[:, 0] = msend[2:]
-            logLpair[0] = msend[0]
-            betapair[0] = msend[1]
-            # print('imcmc',imcmc)
-            # print('isource0',isource0,msend)
-            prop[isource0 - 1, :] = ipropacc[0, :]
-            acc[isource0 - 1, :] = ipropacc[1, :]
-
             # after n_burn_in steps, start using PC rotation for model
             # do n_burn_in steps before saving models; this is used to determine good sampling spacing
             if n_steps == self.n_burn_in and rotation is False:
                 rotation = True
 
-            # want n_keep samples before starting rotation???
-            if n_steps > self.n_keep + self.n_burn_in:
-                # print('Starting PC sampling with nonlinear estimate at imcmc=',imcmc)
-                save_cov_mat = True
-                # mcsum[:, :, ichain] = 0.0
-                # mmsum[:, ichain] = 0.0
+            # PARALLEL COMPUTING
+            delayed_results = []
+            for ind in range(self.n_chains):
+                chain_model = self.chains[ind]
+                beta = beta_values[ind]
+                updated_model = dask.delayed(self.perform_step)(chain_model, beta)
+                delayed_results.append(updated_model)
 
-            for chain_model in received_chains:
-                # maybe perturb_params should be on inversion class?
-                # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
-                chain_model.perturb_params(
-                    self.bounds, self.layer_bounds, self.phase_vel_obs
-                )
-                # cov mat on inversion or model class?
-                chain_model.update_covariance_matrix(self.n_params)
-                # what is cov mat used for if not saved
-                if save_cov_mat:
-                    chain_model.get_hist()
+                if self.n_mcmc >= self.n_burn_in:
+                    self.n_keep += 1  # keeping track of the idex to write into a file
 
-                ## Sending model to Master
-                # can I send an object through here
-                # msend = np.append(np.array([logLcur, beta_chain]), mcur)
+            self.chains = dask.compute(*delayed_results)
+            # prop[source_1 - 1, :] = prop_acc[0, :]
+            # acc[source_1 - 1, :] = prop_acc[1, :]
 
-                comm.Send(pickle.dumps(received_chains), dest=0, tag=rank)
-                comm.Send(self.prop_acc, dest=0, tag=rank)
+            ## Tempering exchange move
+            self.perform_tempering_swap()
 
-                ## Receiving back from Master
-                comm.Recv(msend, source=0, tag=MPI.ANY_TAG)
-                mcur = msend[2:]
-                logLcur = msend[0]
+            if n_steps < self.n_burn_in:
+                save_samples = False
+            else:
+                # save a subset of the models
+                save_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
-                if self.imcmc >= self.n_burn_in:
-                    self.ikeep += 1  # keeping track of the idex to write into a file
+            self.check_convergence(n_steps, save_samples)
+
+            # saving sample
+            if save_samples:
+                self.write_samples(n_steps)
+
+    def perform_step(self, chain_model, beta):
+        """
+        update one chain model.
+        perturb each param on the chain model and accept each new model with a likelihood.
+
+        :param chain_model:
+        :param beta:
+
+        :return: updated chain model
+        """
+        # *** might move perturb params to inversion class. clean this up ***
+        # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
+        chain_model.perturb_params(self.bounds, self.phase_vel_obs)
+        # cov mat on inversion or model class?
+        chain_model.update_covariance_matrix(self.n_params)
+        # only update the histogram if it's being saved
+        chain_model.update_hist()
+
+        return chain_model
 
     def perform_tempering_swap(self):
         ## Tempering exchange move
@@ -242,7 +159,9 @@ class Inversion:
                 if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
 
-    def check_convergence(self, n_steps, hist_conv=0.05, out_dir="./out/"):
+    def check_convergence(
+        self, n_steps, save_samples, hist_conv=0.05, out_dir="./out/"
+    ):
         """
         check if the model has converged.
 
@@ -252,13 +171,6 @@ class Inversion:
         """
         # do at least n_after_rot steps after starting rotation before model can converge
         enough_rotations = n_steps > (self.n_burn_in + self.n_after_rot)
-
-        # only save after burn-in
-        if n_steps > self.n_burn_in:
-            save_hist = False
-        else:
-            # save a subset of the models
-            save_hist = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
         # SUBTRACTING 2 NORMALIZED HISTOGRAM
         # find the max of abs of the difference between 2 models
@@ -286,12 +198,10 @@ class Inversion:
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
-        # saving sample
-        if save_hist:
+        if save_samples:
             self.hist_diff_plot.append(hist_diff)
-            self.save_samples(n_steps)
 
-    def save_samples(betapair):
+    def write_samples(betapair):
         """
         Write out to csv in chunks of size n_keep.
         """
