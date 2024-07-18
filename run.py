@@ -3,7 +3,7 @@ from inversion import Inversion
 import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
-from velocity_model import TrueModel, ChainModel
+from velocity_model import Model, TrueModel, ChainModel
 
 # TODO:
 # - add environment
@@ -21,9 +21,32 @@ from velocity_model import TrueModel, ChainModel
 # - optimization
 
 
+@staticmethod
+def get_betas(n_temps, dTlog=1.15):
+    """
+    setting values for beta to be used. the first quarter of the chains have beta=0
+
+    :param dTlog:
+
+    :return beta: inverse temperature; beta values to use for each chain
+    """
+    # *** maybe this function should be replaced with a property later***
+    # Parallel tempering schedule
+    # the first ~1/4 of chains have beta value of 0..?
+    n_temps_frac = int(np.ceil(n_temps / 4))
+    betas = np.zeros(n_temps, dtype=float)
+
+    inds = np.arange(n_temps_frac, n_temps)
+    betas[inds] = 1.0 / dTlog**inds
+    # T = 1.0 / beta
+
+    return betas
+
+
 def setup_scene(
     n_layers,
     n_data,
+    n_chains,
     model_depth,
     sigma_pd,
     poisson_ratio=0.265,
@@ -39,8 +62,10 @@ def setup_scene(
     :param poisson_ratio:
     :density_params: Birch parameters to use for initial density profile.
     """
+    # *** might move n_bins, n_keep to inversion class. ***
 
     # *** add units ***
+    # *** are we checking bounds for the other parameters? ***
     # Bounds of search (min, max)
     bounds_dict = {
         "layer_thickness": [5, 15],
@@ -61,15 +86,24 @@ def setup_scene(
     freqs = np.linspace(400, 1600, n_data)  # (Hz)
 
     # generate true model
-    true_model = TrueModel(
-        n_data, layer_bounds, poisson_ratio, density_params, sigma_pd
+    true_model_params = Model.generate_model_params(
+        n_data, layer_bounds, poisson_ratio, density_params
     )
+    true_model = TrueModel(freqs, n_data, *true_model_params, sigma_pd)
 
-    return (
-        freqs,
-        bounds,
-        true_model,
-    )
+    # generate the starting models
+    betas = get_betas(n_chains)
+    starting_models = []
+    for ind in range(n_chains):
+        # *** generate params within bounds, poisson_ratio, and density_params ? ***
+        # *** starting_model params should be separate from true model params ***
+        starting_model_params = Model.generate_model_params(
+            n_data, layer_bounds, poisson_ratio, density_params
+        )
+        model = ChainModel(betas[ind], *starting_model_params)
+        starting_models.append(model)
+
+    return (freqs, param_bounds, betas, true_model, starting_models)
 
 
 def run(
@@ -78,6 +112,10 @@ def run(
     n_layers=10,
     model_depth=20,
     sigma_pd=0.0001,
+    n_bins=200,
+    n_burn=10000,
+    n_keep=2000,
+    n_rot=40000,
 ):
     """
     Run inversion.
@@ -90,20 +128,26 @@ def run(
     """
 
     # declare parameters needed for inversion; generate true model
-    freqs, bounds, true_model = setup_scene(n_layers, n_data, model_depth, sigma_pd)
-
-    # create freqs, data matrix to give to inversion?
-    phase_vel_obs = true_model.phase_vel_obs
-
-    # *** starting models should be generate within inversion. currently they are generated from the true model... how should they be generated? ***
-    # *** move generate_starting models to inversion init (and get n_keep from inversion) ***
-    chains = ChainModel.generate_starting_models(
-        n_chains, freqs, true_model, param_bounds, sigma_pd, n_keep=200
+    freqs, param_bounds, betas, true_model, starting_models = setup_scene(
+        n_layers, n_data, model_depth, sigma_pd
     )
 
     # run inversion
-    inversion = Inversion(chains, bounds, n_layers)
-    inversion.run_inversion(freqs, phase_vel_obs, bounds, sigma_pd)
+    inversion = Inversion(
+        freqs,
+        n_layers,
+        param_bounds,
+        starting_models,
+        true_model.phase_vel_obs,
+        sigma_pd,
+        # n_bins,
+        # n_burn,
+        # n_keep,
+        # n_rot,
+    )
+    inversion.random_walk()
+
+    # plots and comparing results to true model
 
 
 if __name__ == "__main__":

@@ -2,62 +2,60 @@ import numpy as np
 import pandas as pd
 import sys
 import dask
+from velocity_model import ChainModel
 
 
 class Inversion:
     def __init__(
         self,
-        chains,
-        bounds,
-        n_burn=10000,  # index for burning
+        freqs,
+        n_layers,
+        param_bounds,
+        starting_models,
+        phase_vel_obs,
+        sigma_pd,
+        n_bins=200,
+        n_burn=10000,
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
     ):
-        """ """
-        self.bounds = bounds
+        """
+        :param freqs: frequencies at which data is measured
+        :param n_layers: number of layers in the model
+        :param param_bounds: min, max bounds for each model param
+        :param starting_models: starting model for each chain
+        :param phase_vel_obs: observed data/phase velocity
+        :param sigma_pd: uncertainty in data/phase velocity
+        :param n_bins: number of bins for the model histograms
+        :param n_burn: number of steps to discard from the start of the run (to avoid bias towards the starting model)
+        :param n_keep: number of steps/iterations to save to file at a time
+        :param n_rot: number of steps to do after nonlinear rotation starts
+        """
+        self.param_bounds = param_bounds
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of random walks
 
-        self.chains = chains
+        # define chains here, pass beta values
+        self.chains = starting_models
         self.n_chains = len(self.chains)
+        for chain in self.chains:
+            chain.logL = ChainModel.get_likelihood(
+                freqs,
+                chain.velocity_model,
+                sigma_pd,
+                chain.n_params,
+                phase_vel_obs,
+            )
+            # *** validate sigma_pd ***
+            chain.lin_rot(freqs, self.param_bounds, sigma_pd)
+
         self.logL = np.zeros(self.n_chains)
         self.hist_diff_plot = []
 
-        self.swap_acc = 1
-        self.swap_prop = 1
-
-    def run_inversion(self, freqs, bounds, sigma_pd):
-        """ """
-        # is lin_rot just for an initial u, pscd?
-        for chain_model in self.chains:
-            chain_model.lin_rot(freqs, bounds, sigma_pd)
-
-        # mcmc random walk
-        self.random_walk()
-
-    def get_beta(self, dTlog=1.15):
-        """
-        setting values for beta to be used. the first quarter of the chains have beta=0
-
-        :param dTlog:
-
-        :return beta: inverse temperature; beta values to use for each chain
-        """
-        # *** maybe this function should be replaced with a property later***
-        # Parallel tempering schedule
-        n_temps = self.n_chains
-        # the first ~1/4 of chains have beta value of 0..?
-
-        n_temps_frac = int(np.ceil(self.n_chains / 4))
-        beta = np.zeros(n_temps, dtype=float)
-
-        inds = np.arange(n_temps_frac, n_temps)
-        beta[inds] = 1.0 / dTlog**inds
-        # T = 1.0 / beta
-
-        return beta
+        self.swap_acc = 0
+        self.swap_prop = 0
 
     def random_walk(
         self,
@@ -69,20 +67,24 @@ class Inversion:
         """
         beta_values = self.get_beta()
 
-        rotation = False
         for n_steps in range(self.n_mcmc):
             # after n_burn_in steps, start using PC rotation for model
             # do n_burn_in steps before saving models; this is used to determine good sampling spacing
-            if n_steps == self.n_burn_in and rotation is False:
-                rotation = True
 
             # PARALLEL COMPUTING
             delayed_results = []
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
                 beta = beta_values[ind]
-                updated_model = dask.delayed(self.perform_step)(chain_model, beta)
+                updated_model = dask.delayed(self.perform_step)(chain_model)
                 delayed_results.append(updated_model)
+
+                if n_steps == self.n_burn_in:
+                    # rotation
+                    self.u, s, vh = np.linalg.svd(
+                        self.cov_mat
+                    )  # rotate it to its Singular Value Decomposition
+                    self.pcsd = np.sqrt(s)
 
                 if self.n_mcmc >= self.n_burn_in:
                     self.n_keep += 1  # keeping track of the idex to write into a file
@@ -92,7 +94,7 @@ class Inversion:
             # acc[source_1 - 1, :] = prop_acc[1, :]
 
             ## Tempering exchange move
-            self.perform_tempering_swap()
+            self.perform_tempering_swap(beta)
 
             if n_steps < self.n_burn_in:
                 save_samples = False
@@ -106,23 +108,22 @@ class Inversion:
             if save_samples:
                 self.write_samples(n_steps)
 
-    def perform_step(self, chain_model, beta):
+    def perform_step(self, chain_model):
         """
         update one chain model.
         perturb each param on the chain model and accept each new model with a likelihood.
 
         :param chain_model:
-        :param beta:
 
         :return: updated chain model
         """
         # *** might move perturb params to inversion class. clean this up ***
         # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
-        chain_model.perturb_params(self.bounds, self.phase_vel_obs)
+        chain_model.perturb_params(self.param_bounds, self.phase_vel_obs)
         # cov mat on inversion or model class?
-        chain_model.update_covariance_matrix(self.n_params)
+        chain_model.update_covariance_matrix(self.param_bounds)
         # only update the histogram if it's being saved
-        chain_model.update_hist()
+        chain_model.update_hist(self.param_bounds, self.n_bins)
 
         return chain_model
 
@@ -155,7 +156,8 @@ class Inversion:
                     if beta_1 == 1 or beta_2 == 1:
                         self.swap_acc += 1
 
-                # swapprop and swapacc are for calculating swap rate....
+                # swap_tot and swapacc are for calculating swap rate....
+                # if beta is 1, this is the master chain?
                 if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
 

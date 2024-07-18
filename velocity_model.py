@@ -5,7 +5,7 @@ from scipy import interpolate
 
 
 class Model:
-    def __init__(self, freqs, n_data, thickness, vel_p, vel_s, sigma_pd):
+    def __init__(self, freqs, n_data, vel_s, vel_p, density, thickness, sigma_pd):
         self.freqs = freqs
         self.n_data = n_data
 
@@ -18,75 +18,25 @@ class Model:
         self.params = np.concatenate((self.thickness, self.vel_s, [self.sigma_pd]))
         self.n_params = len(self.params)
         self.n_data = self.n_params  # * difference between n params and n data?
-        self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
-
-        # map params indices to velocity model indices.
-        # n_layers = len(self.thickness)
-        # params_indices = np.arange(self.n_params)
-
-        # velocity_model_indices = np.concatenate((np.arange(n_layers), np.arange(2*n_layers, 3*n_layers)))
-        # self.map_indices = dict(zip(params_indices, velocity_model_indices))
+        # self.velocity_model = [self.thickness, self.vel_p, self.vel_s, self.density]
 
     @property
-    def velocity_model():
+    def velocity_model(self):
+        # return [self.thickness, self.vel_p, self.vel_s, self.density]
         return self.get_velocity_model()
 
     # abstract function
-    def get_velocity_model():
-        pass
+    def get_velocity_model(self):
+        return [self.thickness, self.vel_p, self.vel_s, self.density]
 
-    def forward_model(freqs, model):
-        """
-        Get phase dispersion curve from shear velocities.
-        """
-        periods = 1 / freqs
-        pd = PhaseDispersion(*model.velocity_model)
-        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
-        # ell = Ellipticity(*velocity_model.T)
-
-        return pd_rayleigh
-
-
-class TrueModel(Model):
-    def __init__(self, layer_bounds, poisson_ratio, density_params, sigma_pd):
-        """
-        Generate true model, which will be used to create simulated observed pd curves.
-
-        :param n_data: Number of observed data to simulate.
-        :param layer_bounds: [min, max] for layer thicknesses. (m)
-        :param poisson_ratio:
-        :param density_params: Birch params to simulate density profile.
-        :param sigma_pd: Uncertainty to add to simulated data.
-        """
-        self.initialize_model(layer_bounds, poisson_ratio, density_params, sigma_pd)
-
-        # initialize velocity model
-        super().__init__(thickness, vel_p, vel_s, sigma_pd)
-
-        # generate simulated data and observations for the true model
-        self.create_simulated_data()
-
-    def generate_simulated_data(self):
-        """
-        generate simulated data and observations.
-        """
-        # get simulated true phase dispersion
-        pd_rayleigh = self.forward_model(self.freqs, self.velocity_model)
-        # generate simulated observed data by adding noise to true values.
-        self.phase_vel_true = pd_rayleigh.velocity
-        # *** the true sigma_pd on the model should be generated? it's not the same as initial guess for the model. ***
-        self.phase_vel_obs = self.phase_vel_true + self.sigma_pd * np.random.randn(
-            self.n_data
-        )
-
-    def initialize_model(self, layer_bounds, poisson_ratio, density_params, sigma_pd):
+    @staticmethod
+    def generate_model_params(n_data, layer_bounds, poisson_ratio, density_params):
         """
         generating true velocity model from PREM.
 
         :param layer_bounds: [min, max] for layer thicknesses. (m)
         :param poisson_ratio:
         :param density_params: Birch params to simulate density profile.
-        :param sigma_pd: Uncertainty to add to simulated data.
         """
 
         # from PREM...
@@ -94,7 +44,7 @@ class TrueModel(Model):
 
         # generate layer thicknesses
         thickness = np.random.uniform(
-            layer_bounds[0], layer_bounds[1], self.n_data
+            layer_bounds[0], layer_bounds[1], n_data
         )  # validate that this is uniform
         # this is setting the depth to be the bottom of each layer ***
         depth = np.cumsum(thickness)
@@ -130,10 +80,7 @@ class TrueModel(Model):
         # Birch's law
         # self.density = (vel_p - density_params[0]) / density_params[1]
 
-        self.vel_s = vel_s
-        self.vel_p = vel_p
-        self.density = density
-        self.thickness = thickness
+        return vel_s, vel_p, density, thickness
 
     def get_birch_params():
         # fit to prem
@@ -146,38 +93,83 @@ class TrueModel(Model):
         # fit the curve
         density_params = np.polyfit(radius, prem_density, deg=1)
         # returns [-1.91018882e-03  1.46683536e+04]
+        return density_params
+
+    def forward_model(freqs, model):
+        """
+        Get phase dispersion curve from shear velocities.
+        """
+        periods = 1 / freqs
+        pd = PhaseDispersion(*model.velocity_model)
+        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+        # ell = Ellipticity(*velocity_model.T)
+
+        return pd_rayleigh
+
+
+class TrueModel(Model):
+    def __init__(self, *args):
+        """
+        Generate true model, which will be used to create simulated observed pd curves.
+
+        :param n_data: Number of observed data to simulate.
+        :param layer_bounds: [min, max] for layer thicknesses. (m)
+        :param poisson_ratio:
+        :param density_params: Birch params to simulate density profile.
+        :param sigma_pd: Uncertainty to add to simulated data.
+        """
+        # initialize velocity model
+        super().__init__(*args)
+        # generate simulated data and observations for the true model
+        self.generate_simulated_data()
+
+    def generate_simulated_data(self):
+        """
+        generate simulated data and observations.
+        """
+        # get simulated true phase dispersion
+        pd_rayleigh = self.forward_model(self.freqs, self.velocity_model)
+        # generate simulated observed data by adding noise to true values.
+        self.phase_vel_true = pd_rayleigh.velocity
+        # *** the true sigma_pd on the model should be generated? it's not the same as initial guess for the model. ***
+        self.phase_vel_obs = self.phase_vel_true + self.sigma_pd * np.random.randn(
+            self.n_data
+        )
 
 
 class ChainModel(Model):
-    def __init__(self, thickness, vel_p, vel_s, sigma_pd, n_keep, n_bins=200):
-        super().__init__(thickness, vel_p, vel_s, sigma_pd)
+    def __init__(self, beta, *args):
+        """
+        :param beta:
+        """
+        super().__init__(*args)
 
-        self.vel_phase = None
+        self.beta = beta
+
         self.logL = None
-
         self.pcsd = 1 / 20  # PC standard deviation
         self.u = np.eye(self.n_params)
 
         # convergence params
-        # *** rename ***
         self.ncov = 0  # initialize the dividing number for covariance
 
+        self.mw = np.zeros(self.n_params)
         self.mbar = np.zeros(self.n_params)
-        self.mmsum = np.zeros(
-            (self.n_params)
-        )  # initiazlize parameter mean vector: becareful with the dimension of Nx1 vs just N (a vector)
+        self.mmsum = np.zeros((self.n_params))  # initialize parameter mean vector
         self.cov_mat_sum = np.zeros(
             (self.n_params, self.n_params)
         )  # initialize covariance matrix sum
         self.cov_mat = np.zeros(
             (self.n_params, self.n_params)
-        )  # initialize covariance matrix, 3 dimmensions with Nchain
+        )  # initialize covariance matrix
+        self.hist_m = None
 
-        self.hist_m = np.zeros(
-            (n_bins + 1, self.n_params)
-        )  # initialize histogram of model parameter, 10 bins -> 11 edges by Npar
+        # acceptance ratio for each parameter
+        self.acc_ratio = np.zeros(self.n_params)
+        self.swap_acc = 1
+        self.swap_prop = 1
 
-        saved_results = {
+        self.saved_results = {
             "logL": np.zeros(n_keep),
             "m": np.zeros(n_keep),
             "d": np.zeros(n_keep),
@@ -188,41 +180,6 @@ class ChainModel(Model):
         return np.all(params >= param_bounds[:, 0]) and np.all(
             params <= param_bounds[:, 1]
         )
-
-    def generate_starting_models(
-        n_chains, freqs, true_model, param_bounds, sigma_pd, pcsd=0.05
-    ):
-        """
-        Loop until a valid starting model is created.
-
-        """
-        n_params = true_model.n_params
-        chains = []
-        for c in range(n_chains):
-            valid_model = False
-            # maybe there's another way to generate starting model
-            starting_model = true_model.copy()
-            true_params = true_model.params
-
-            while not valid_model:
-                starting_params = true_params + pcsd * np.random.randn(
-                    true_model.n_params
-                )
-                # validate, check bounds
-                valid_model = ChainModel.validate_params(starting_params, param_bounds)
-
-            starting_model.params = starting_params
-            # calculate likelihood
-            starting_model.logL = ChainModel.get_likelihood(
-                freqs,
-                starting_model.velocity_model,
-                sigma_pd,
-                n_params,
-                true_model.phase_vel_obs,
-            )
-            chains.append(starting_model)  # validate
-
-        return chains
 
     def perturb_params(self, param_bounds, phase_vel_obs, scale_factor=1.3):
         """
@@ -235,8 +192,8 @@ class ChainModel(Model):
         """
 
         # normalizing, rotating
-        test_params = (self.params - param_bounds[:, 0]) / param_bounds[:, 1]
-        test_params = np.matmul(np.transpose(u), test_params)
+        test_params = (self.params - param_bounds[:, 0]) / param_bounds[:, 2]
+        test_params = np.matmul(np.transpose(self.u), test_params)
 
         # *** Cauchy proposal, check other options ***
         # generate params to try; Cauchy proposal
@@ -248,8 +205,9 @@ class ChainModel(Model):
 
         # rotating back and scaling again
         test_params = np.matmul(self.u, test_params)
-        test_params = param_bounds[:, 0] + (test_params * param_bounds[:, 1])
+        test_params = param_bounds[:, 0] + (test_params * param_bounds[:, 2])
 
+        # *** this is incorrect... ***
         # loop over params and perturb
         for ind in range(self.n_params):
             # validate test params
@@ -279,15 +237,13 @@ class ChainModel(Model):
                 self.params = test_params  # validate this
                 # self.vel_rayleigh =
 
-    def get_jacobian(self, freqs, n_dm=50):
-        """
-        n_freqs is also n_depths | n_layers
-        """
-        n_freqs = len(freqs)
+    def get_jacobian(self, n_dm=50):
+        """ """
+        # *** go over this again with n_data ***
         dm_start = self.params * 0.1
         dm = np.zeros(n_dm, self.n_params)
         dm[0] = dm_start
-        dRdm = np.zeros((self.n_params, n_freqs, n_dm))
+        dRdm = np.zeros((self.n_params, self.n_data, n_dm))
 
         # Estimate deriv for range of dm values
         for dm_ind in range(n_dm):
@@ -298,8 +254,8 @@ class ChainModel(Model):
                 model_pos[param_ind] = model_pos[param_ind] + dm[param_ind, dm_ind]
 
                 # each frequency is a datum?
-                pdr_pos = VelocityModel.forward_model(freqs, model_pos)
-                pdr_neg = VelocityModel.forward_model(freqs, model_neg)
+                pdr_pos = Model.forward_model(self.freqs, model_pos)
+                pdr_neg = Model.forward_model(self.freqs, model_neg)
 
                 dRdm[param_ind, :, dm_ind] = np.where(
                     (np.abs((pdr_pos - pdr_neg) / (pdr_pos + pdr_neg)) > 1.0e-7 < 5),
@@ -311,16 +267,16 @@ class ChainModel(Model):
                 if dm_ind < n_dm - 1:
                     dm[:, dm_ind + 1] = dm[:, dm_ind] / 1.5
 
-        Jac = self.get_best_derivative(dRdm, n_freqs, n_dm)
+        Jac = self.get_best_derivative(dRdm, self.n_data, n_dm)
 
         return Jac
 
-    def get_best_derivative(self, dRdm, n_freqs, n_dm):
-        Jac = np.zeros((n_freqs, self.n_params))
+    def get_best_derivative(self, dRdm, n_dm):
+        Jac = np.zeros((self.n_data, self.n_params))
         # can prolly simplify these loops ***
         for param_ind in range(self.n_params):
             for freq_ind in range(
-                n_freqs
+                self.n_data
             ):  # For each datum, choose best derivative estimate
                 best = 1.0e10
                 ibest = 1
@@ -355,24 +311,37 @@ class ChainModel(Model):
 
         return Jac
 
-    def lin_rot(self, freqs, param_bounds, sigma=0.1):
-        n_freqs = len(freqs)
+    def lin_rot(self, param_bounds, sigma_pd, variance=1 / 12):
+        """
+        :param param_bounds:
+        :param sigma_pd: uncertainty in the data
+        :param variance: from trial and error?
 
-        Jac = self.get_jacobian(freqs, n_freqs)
-        Jac = Jac * param_bounds[:, 2]  # Scale columns of Jacobian for stability
+        :return sigma_pcsd:
+        """
+        Jac = self.get_jacobian()
+        # Scale columns of Jacobian for stability
+        # *** validate ***
+        Jac = Jac * param_bounds[:, 2]  # multiplying by parameter range
 
-        # what should this value be ??
-        Mpriorinv = np.diag(self.n_params * [12])  # variance for U[0,1]=1/12
+        # prior model covariance matrix representing an assumed Gaussian prior density about the current model
+        cov_prior_inv = np.diag(self.n_params / variance)
 
-        Cdinv = np.diag(1 / sigma**2)  # what should sigma be ??
+        # the data covariance matrix
+        cov_data_inv = np.diag(self.beta / sigma_pd**2)
 
-        JactCdinv = np.matmul(np.transpose(Jac), Cdinv)
-        Ctmp = np.matmul(JactCdinv, Jac) + Mpriorinv
+        #
+        cov_cur = (
+            np.matmul(np.matmul(np.transpose(Jac), cov_data_inv), Jac) + cov_prior_inv
+        )
 
-        V, L, VT = np.linalg.svd(Ctmp)
-        pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
+        # singular value decomposition.
+        # the singular values, within each vector sorted in descending order.
+        # parameter variance in PC space (?)
+        _, L, _ = np.linalg.svd(cov_cur)
+        sigma_pcsd = 1 / (2 * np.sqrt(np.abs(L)))  # PC standard deviations
 
-        return pcsd
+        return sigma_pcsd, L
 
     def get_likelihood(freqs, velocity_model, sigma_pd, n_params, phase_vel_obs):
         """ """
@@ -387,13 +356,20 @@ class ChainModel(Model):
 
         return np.sum(logL)
 
-    def update_hist(self):
-        for ipar in np.arange(len(mt)):
-            edge = np.linspace(minlim[ipar], maxlim[ipar], nbin + 1)
-            idx_dif = np.argmin(abs(edge - mcur[ipar, ichain]))
-            self.hist_m[idx_dif, ipar, ichain] += 1
+    def update_hist(self, param_bounds, n_bins):
+        """ """
+        # *** not sure where n_bins should be stored. maybe hist_m should be a property ***
+        if self.hist_m is None:
+            self.hist_m = np.zeros(
+                (n_bins + 1, self.n_params)
+            )  # initialize histogram of model parameters
 
-    def update_covariance_matrix(self, n_params, param_bounds, rotation: bool):
+        for ind in range(self.n_params):
+            edge = np.linspace(param_bounds[ind, 0], param_bounds[ind, 1], n_bins + 1)
+            idx_diff = np.argmin(abs(edge - self.params[ind]))
+            self.hist_m[idx_diff, ind] += 1
+
+    def update_covariance_matrix(self, param_bounds):
         """
         np.cov: A 1-D or 2-D array containing multiple variables and observations.
         Each row of m represents a variable, and each column a single observation of all those variables.
@@ -404,23 +380,25 @@ class ChainModel(Model):
         # can we get the covariance matrix for both chains at the same time?
         # does the numpy cov function help?
 
+        # these variables could just be local..? does it matter?
+
         # normalizing
-        mw = (self.params - param_bounds[:, 0]) / param_bounds[:, 2]
+        self.m_w = (self.params - param_bounds[:, 0]) / param_bounds[:, 2]
 
-        self.mmsum += mw  # calculating the sum of mean(m)
-        self.ncov += 1
-        self.mbar = self.mmsum / self.ncov
-        self.mcsum = self.mcsum + np.outer(np.transpose(mw - self.mbar), mw - self.mbar)
-        self.cov_mat = self.mcsum / self.ncov  # calculating covariance matrix
+        self.mm_sum += self.m_w  # calculating the sum of mean(m)
+        self.n_cov += 1  #
 
-        for ipar in range(n_params):
-            for jpar in range(n_params):
-                self.cov_mat[ipar, jpar] = self.cov_mat[ipar, jpar] / np.sqrt(
-                    self.cov_mat[ipar, ipar] * self.cov_mat[jpar, jpar]
+        self.m_bar = self.mm_sum / self.n_cov
+        self.mc_sum = self.mc_sum + np.outer(
+            np.transpose(self.mw - self.m_bar), self.m_w - self.m_bar
+        )
+        self.cov_mat = self.mc_sum / self.n_cov  # calculating covariance matrix
+
+        for param_ind in range(self.n_params):
+            for data_ind in range(self.n_data):
+                self.cov_mat[param_ind, data_ind] = self.cov_mat[
+                    param_ind, data_ind
+                ] / np.sqrt(
+                    self.cov_mat[param_ind, param_ind]
+                    * self.cov_mat[data_ind, data_ind]
                 )
-        # rotation
-        if rotation:
-            self.u, s, vh = np.linalg.svd(
-                self.cov_mat
-            )  # rotate it to its Singular Value Decomposition
-            self.pcsd = np.sqrt(s)
