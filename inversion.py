@@ -35,7 +35,7 @@ class Inversion:
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
-        self.n_mcmc = 100000 * n_keep  # number of random walks
+        self.n_mcmc = 100000 * n_keep  # number of steps for the random walk
 
         # define chains here, pass beta values
         self.chains = starting_models
@@ -49,6 +49,7 @@ class Inversion:
                 phase_vel_obs,
             )
             # *** validate sigma_pd ***
+            # setting initial values for u, pcsd...
             chain.lin_rot(freqs, self.param_bounds, sigma_pd)
 
         self.logL = np.zeros(self.n_chains)
@@ -59,29 +60,20 @@ class Inversion:
 
     def random_walk(
         self,
-        cconv=0.3,
+        hist_conv=0.05,
     ):
-        """
-        The burn-in stage performs this search in a part of the algorithm that disregards detailed balance.
-        Once burn-in is concluded, sampling with detailed balance starts and samples are recorded.
-        """
-        beta_values = self.get_beta()
-
+        """ """
         for n_steps in range(self.n_mcmc):
-            # after n_burn_in steps, start using PC rotation for model
-            # do n_burn_in steps before saving models; this is used to determine good sampling spacing
-
             # PARALLEL COMPUTING
             delayed_results = []
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
-                beta = beta_values[ind]
                 updated_model = dask.delayed(self.perform_step)(chain_model)
                 delayed_results.append(updated_model)
 
                 if n_steps == self.n_burn_in:
-                    # rotation
-                    self.u, s, vh = np.linalg.svd(
+                    # when burn in finishes, update values of u, pcsd
+                    self.u, s, _ = np.linalg.svd(
                         self.cov_mat
                     )  # rotate it to its Singular Value Decomposition
                     self.pcsd = np.sqrt(s)
@@ -94,19 +86,17 @@ class Inversion:
             # acc[source_1 - 1, :] = prop_acc[1, :]
 
             ## Tempering exchange move
-            self.perform_tempering_swap(beta)
+            self.perform_tempering_swap()
 
-            if n_steps < self.n_burn_in:
-                save_samples = False
-            else:
+            save_samples, write_samples = False, False
+            if n_steps >= self.n_burn_in:
+                save_samples = True
                 # save a subset of the models
-                save_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
+                write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
-            self.check_convergence(n_steps, save_samples)
-
-            # saving sample
-            if save_samples:
-                self.write_samples(n_steps)
+            # saving sample and write to file
+            self.check_convergence(n_steps, hist_conv, save_samples)
+            self.store_samples(n_steps, write_samples)
 
     def perform_step(self, chain_model):
         """
@@ -161,9 +151,7 @@ class Inversion:
                 if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
 
-    def check_convergence(
-        self, n_steps, save_samples, hist_conv=0.05, out_dir="./out/"
-    ):
+    def check_convergence(self, n_steps, hist_conv, save_samples, out_dir="./out/"):
         """
         check if the model has converged.
 
@@ -184,6 +172,10 @@ class Inversion:
             )
         ).max()
 
+        if save_samples:
+            self.hist_diff_plot.append(hist_diff)
+
+        # *** should be collecting this info before hist is converged, right? ***
         if (hist_diff < hist_conv) & enough_rotations:
             # collect results
             keys = ["logL", "m", "d", "acc"]
@@ -200,65 +192,31 @@ class Inversion:
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
-        if save_samples:
-            self.hist_diff_plot.append(hist_diff)
-
-    def write_samples(betapair):
+    def store_samples(self, n_steps, write_samples):
         """
         Write out to csv in chunks of size n_keep.
         """
-        ## Saving sample into buffers
-        if betapair[0] == 1:
-            logLkeep2[ikeep, :] = np.append(logLpair[0], betapair[0])
-            mkeep2[ikeep, :] = np.append(mpair[:, 0], isource0)
-            # dkeep2[ikeep,:] = np.append(dcur[:,ichain],isource0)
-            acckeep2[ikeep, :] = (acc[isource0 - 1, :]).astype(float) / (
-                prop[isource0 - 1, :]
-            ).astype(float)
-            # print(imcmc,isource0,betapair[0])
-            ikeep += 1
-        if betapair[1] == 1:
-            logLkeep2[ikeep, :] = np.append(logLpair[1], betapair[1])
-            mkeep2[ikeep, :] = np.append(mpair[:, 1], isource1)
-            # dkeep2[ikeep,:] = np.append(dcur[:,ichain],isource0)
-            acckeep2[ikeep, :] = (acc[isource1 - 1]).astype(float) / (
-                prop[isource1 - 1]
-            ).astype(float)
-            # print(imcmc,isource0,betapair[1])
-            ikeep += 1
+        # use dask to save?
 
-        #
-        if ikeep >= NKEEP - 1:  # dump to a file
-            df = pd.DataFrame(logLkeep2[: ikeep - 1, :], columns=["logLkeep2", "beta"])
-            df.to_csv(
-                out_dir + "logLkeep2_example.csv",
-                mode="w" if (ihead == 1) else "a",
-                header=True if (ihead == 1) else False,
-            )  # save logLkeep2 to csv
+        # saving the chain model with beta of 1
+
+        for chain in self.chains:
+            if chain.beta == 1:
+                # maybe move this to model class
+                self.stored_results["params"].append(chain.params)
+                self.stored_results["logL"].append(chain.logL)
+                self.stored_results["beta"].append(chain.beta)
+                self.stored_results["acc"].append(chain.acc)
+
+        if write_samples:
+            # if it is the first time saving, write to file with mode="w"
+            # otherwise append with mode="a"
+
             df = pd.DataFrame(
-                mkeep2[: ikeep - 1, :], columns=np.append(mt_name, "ichain")
+                self.stored_results, columns=["params", "logL", "beta", "acc"]
             )
             df.to_csv(
-                out_dir + "mkeep2_example.csv",
+                out_dir + "inversion_results.csv",
                 mode="w" if (ihead == 1) else "a",
                 header=True if (ihead == 1) else False,
-            )  # save mkeep2 to csv
-            # df=pd.DataFrame(dkeep2,columns=np.append(sta_name_all,'ichain'))
-            # df.to_csv(out_dir+"dkeep2_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False) #save dkeep2 to csv
-            df = pd.DataFrame(acckeep2[: ikeep - 1, :], columns=[mt_name])
-            df.to_csv(
-                out_dir + "acc_example.csv",
-                mode="w" if (ihead == 1) else "a",
-                header=True if (ihead == 1) else False,
-            )  # save acc to csv
-            # df=pd.DataFrame(hist_d_plot)
-            # df.to_csv(out_dir+"Conv_example.csv",mode= 'w' if (ihead==1) else 'a',header= True if (ihead==1) else False)
-
-            # for ichain_id in np.arange(Nchain):
-            #    df=pd.DataFrame(Cov[:,:,ichain_id])
-            #    df.to_csv(out_dir+"Cov_example_"+str(ichain_id)+".csv") #save covariance matrix to csv
-            print("imcmc:", imcmc)
-            print("PT swap acceptance:", float(swapacc) / float(swapprop))
-            print("In-chain acceptance", acckeep2[ikeep - 1, :])
-            ihead = 0
-            ikeep = 0
+            )
