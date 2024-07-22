@@ -19,7 +19,7 @@ class Inversion:
         freqs,
         phase_vel_obs,
         n_bins=200,
-        n_burn=10000,
+        n_burn_in=10000,
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
     ):
@@ -31,28 +31,31 @@ class Inversion:
         :param phase_vel_obs: observed data/phase velocity
         :param sigma_pd: uncertainty in data/phase velocity
         :param n_bins: number of bins for the model histograms
-        :param n_burn: number of steps to discard from the start of the run (to avoid bias towards the starting model)
+        :param n_burn_in: number of steps to discard from the start of the run (to avoid bias towards the starting model)
         :param n_keep: number of steps/iterations to save to file at a time
         :param n_rot: number of steps to do after nonlinear rotation starts
         """
+        # parameters from scene
         self.freqs = freqs
         self.n_layers = n_layers
         self.param_bounds = param_bounds
-        self.phase_vel_obs = phase_vel_obs
+        self.phase_vel_obs = phase_vel_obs  # observed data
 
-        self.n_burn = n_burn
+        # parameters related to number of steps taken in random walk
+        self.n_burn_in = n_burn_in
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of steps for the random walk
 
-        # define chains here, pass beta values
+        # define chains here
         self.n_chains = n_chains
         # *** init_sigma_pd is for lin_rot?? ***
-        self.chains = self.initialize_chains(
+        self.initialize_chains(
             n_data, layer_bounds, poisson_ratio, density_params, init_sigma_pd
         )
 
-        self.logL = np.zeros(self.n_chains)
+        # parameters for saving data
+        self.n_bins = n_bins
         self.hist_diff_plot = []
 
         self.swap_acc = 0
@@ -93,6 +96,7 @@ class Inversion:
             # *** starting_model params should be separate from true model params ***
             model = ChainModel(
                 betas[ind],
+                self.phase_vel_obs,
                 self.n_keep,
                 self.n_layers,
                 n_data,
@@ -103,14 +107,10 @@ class Inversion:
                 density_params,
                 0,
             )
-            model.logL = model.get_likelihood(
-                model.model_params,
-                self.phase_vel_obs,
-            )
             # *** validate sigma_pd ***
             # setting initial values for u, pcsd...
             # *** lin rot is updated every iteration in burn in? ***
-            model.lin_rot(self.freqs, self.param_bounds, init_sigma_pd)
+            model.lin_rot(self.param_bounds, init_sigma_pd)
 
             chains.append(model)
         self.chains = chains
@@ -130,8 +130,9 @@ class Inversion:
 
                 if n_steps == self.n_burn_in:
                     # when burn in finishes, update values of u, pcsd
+                    # *** check that this cov_mat is up to date here ***
                     self.u, s, _ = np.linalg.svd(
-                        self.cov_mat
+                        chain_model.cov_mat
                     )  # rotate it to its Singular Value Decomposition
                     self.pcsd = np.sqrt(s)
 
@@ -216,8 +217,8 @@ class Inversion:
         :hist_conv:
         :out_dir: path for where to save results.
         """
-        # do at least n_after_rot steps after starting rotation before model can converge
-        enough_rotations = n_steps > (self.n_burn_in + self.n_after_rot)
+        # do at least n_rot steps after starting rotation before model can converge
+        enough_rotations = n_steps > (self.n_burn_in + self.n_rot)
 
         # SUBTRACTING 2 NORMALIZED HISTOGRAM
         # find the max of abs of the difference between 2 models

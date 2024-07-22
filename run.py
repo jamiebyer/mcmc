@@ -55,6 +55,10 @@ def setup_scene(
         ([layer_bounds] * n_layers, [vel_s_bounds] * n_layers, [sigma_pd_bounds]),
         axis=0,
     )
+    # add bounds range to param_bounds
+    range = param_bounds[:, 1] - param_bounds[:, 0]
+    # param_bounds = np.append(param_bounds, range, axis=1)
+    param_bounds = np.column_stack((param_bounds, range))
 
     # *** how would this data be collected? what is the spacing between frequencies? ***
     # *** or should it be periods... ***
@@ -123,9 +127,56 @@ def run(
         n_keep,
         n_rot,
     )
-    inversion.random_walk()
+    # inversion.random_walk()
 
     # plots and comparing results to true model
+    plot_results(true_model)
+
+
+def plot_results(true_model):
+    # plot true s and p velocitys, plot observed phase velocity, plot density profile.
+    plot_scene(true_model)
+
+    # plot convergence...
+    # plot PT swapping
+    # plot likelihood against steps
+    # plot model parameters over time
+    # plot residuals of phase_vel_obs against steps
+    # acceptance rate
+    # step size...
+
+
+def plot_scene(true_model):
+    depths = np.cumsum(true_model.thickness)
+
+    fig, (ax1, ax2) = plt.subplots(ncols=2, sharey=True)
+    # plot true model velocities
+    ax1.plot(true_model.vel_s, depths, label="s velocity")
+    ax1.plot(true_model.vel_p, depths, label="p velocity")
+    ax1.invert_yaxis()
+    ax1.set_xlabel("km/s")
+    ax1.set_ylabel("depth (km)")
+    ax1.set_title("sigma_pd=" + str(true_model.sigma_pd))
+    ax1.legend(loc="best")
+    [ax1.axhline(y=d, c="black", alpha=0.25) for d in depths]
+
+    ax2.plot(true_model.density, depths, label="density")
+    ax2.set_xlabel("g/cm^3")
+    ax2.legend(loc="best")
+    [ax2.axhline(y=d, c="black", alpha=0.25) for d in depths]
+
+    # plot phase velocity against frequency
+    # ax1.plot(true_model.phase_vel_obs, depths, label="phase velocity")
+
+    plt.tight_layout()
+    plt.show()
+    # save to file
+
+
+def plot_histograms(inversion):
+
+    for chain in inversion.chains:
+        pass
 
 
 if __name__ == "__main__":
