@@ -2,18 +2,22 @@ import numpy as np
 import pandas as pd
 import sys
 import dask
-from velocity_model import ChainModel
+from model import ChainModel, Model
 
 
 class Inversion:
     def __init__(
         self,
-        freqs,
+        n_chains,
+        n_data,
         n_layers,
+        layer_bounds,
         param_bounds,
-        starting_models,
+        poisson_ratio,
+        density_params,
+        init_sigma_pd,
+        freqs,
         phase_vel_obs,
-        sigma_pd,
         n_bins=200,
         n_burn=10000,
         n_keep=2000,  # index for writing it down
@@ -31,32 +35,85 @@ class Inversion:
         :param n_keep: number of steps/iterations to save to file at a time
         :param n_rot: number of steps to do after nonlinear rotation starts
         """
+        self.freqs = freqs
+        self.n_layers = n_layers
         self.param_bounds = param_bounds
+        self.phase_vel_obs = phase_vel_obs
+
         self.n_burn = n_burn
         self.n_keep = n_keep
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of steps for the random walk
 
         # define chains here, pass beta values
-        self.chains = starting_models
-        self.n_chains = len(self.chains)
-        for chain in self.chains:
-            chain.logL = ChainModel.get_likelihood(
-                freqs,
-                chain.velocity_model,
-                sigma_pd,
-                chain.n_params,
-                phase_vel_obs,
-            )
-            # *** validate sigma_pd ***
-            # setting initial values for u, pcsd...
-            chain.lin_rot(freqs, self.param_bounds, sigma_pd)
+        self.n_chains = n_chains
+        # *** init_sigma_pd is for lin_rot?? ***
+        self.chains = self.initialize_chains(
+            n_data, layer_bounds, poisson_ratio, density_params, init_sigma_pd
+        )
 
         self.logL = np.zeros(self.n_chains)
         self.hist_diff_plot = []
 
         self.swap_acc = 0
         self.swap_prop = 0
+
+    def get_betas(self, dTlog=1.15):
+        """
+        setting values for beta to be used. the first quarter of the chains have beta=0
+
+        :param dTlog: determines the spacing between values of beta. smaller spacing will
+        have higher acceptance rates. larger spacing will explore more of the space. we want to tune
+        the spacing so our acceptance rate is 30-50%. dTlog should be larger than 1.
+
+        :return beta: inverse temperature; beta values to use for each chain
+        """
+        # *** maybe this function should be replaced with a property later***
+        # Parallel tempering schedule
+        n_temps = self.n_chains
+        # *** later could tune dTlog as the inversion runs, looking at the acceptance rate every ~10 000 steps ***
+        # 1/4 to 1/2 of the chains should be beta=1.
+        n_temps_frac = int(np.ceil(n_temps / 4))
+        betas = np.zeros(n_temps, dtype=float)
+
+        inds = np.arange(n_temps_frac, n_temps)
+        betas[inds] = 1.0 / dTlog**inds
+        # T = 1.0 / beta
+
+        return betas
+
+    def initialize_chains(
+        self, n_data, layer_bounds, poisson_ratio, density_params, init_sigma_pd
+    ):
+        # generate the starting models
+        betas = self.get_betas()
+        chains = []
+        for ind in range(self.n_chains):
+            # *** generate params within bounds, poisson_ratio, and density_params ? ***
+            # *** starting_model params should be separate from true model params ***
+            model = ChainModel(
+                betas[ind],
+                self.n_keep,
+                self.n_layers,
+                n_data,
+                self.freqs,
+                init_sigma_pd,
+                layer_bounds,
+                poisson_ratio,
+                density_params,
+                0,
+            )
+            model.logL = model.get_likelihood(
+                model.model_params,
+                self.phase_vel_obs,
+            )
+            # *** validate sigma_pd ***
+            # setting initial values for u, pcsd...
+            # *** lin rot is updated every iteration in burn in? ***
+            model.lin_rot(self.freqs, self.param_bounds, init_sigma_pd)
+
+            chains.append(model)
+        self.chains = chains
 
     def random_walk(
         self,
