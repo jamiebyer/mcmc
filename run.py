@@ -22,28 +22,31 @@ from model import Model, TrueModel, ChainModel
 
 
 def setup_scene(
-    n_chains,
     n_layers,
     n_data,
-    sigma_pd,
+    sigma_pd_true,
     poisson_ratio=0.265,
-    density_params=[-1.91018882e-03, 1.46683536e04],
+    density_params=[540.6, 360.1],  # *** check units ***
+    # density_params=[989.3, 289.1],
 ):
     """
     Define parameter bounds, frequencies. Create simulated true model and observed data.
 
     :param n_layers: Number of layers in model.
     :param n_data: Number of simulated observed data.
-    :param sigma_pd: Initial estimate for uncertainty in phase velocity.
+    :param sigma_pd:
     :param poisson_ratio:
     :density_params: Birch parameters to use for initial density profile.
+    # https://sci-hub.ru/10.1029/95jb00259
+    # Seismic velocity structure and composition of the continental crust: A global view
+    # Nikolas I. Christensen, Walter D. Mooney
     """
     # *** might move n_bins, n_keep to inversion class. ***
 
     # Bounds of search (min, max)
     # *** add units ***
-    layer_bounds = [5, 15]  # units
-    vel_s_bounds = [2, 6]
+    layer_bounds = [5e-3, 15e-3]  # km
+    vel_s_bounds = [2, 6]  # km/s
     sigma_pd_bounds = [0, 1]
 
     # *** can i still enforce these bounds? ***
@@ -63,27 +66,30 @@ def setup_scene(
     # *** how would this data be collected? what is the spacing between frequencies? ***
     # *** or should it be periods... ***
     # frequencies for simulated observed data
-    freqs = np.linspace(1600, 400, n_data)  # (Hz)
+
+    # frequencies will be input from the data. total depth of the model should be similar to data depth ***
+    # freqs = np.linspace(1600, 400, n_data)  # (Hz)
+    # freqs = np.logspace(0.5, -1.15, n_data)  # (Hz)
+    freqs = np.logspace(2.5, 1.5, n_data)  # (Hz)
 
     true_model = TrueModel(
+        sigma_pd_true,
         n_layers,
         n_data,
         freqs,
-        sigma_pd,
-        layer_bounds,
+        param_bounds,
         poisson_ratio,
         density_params,
     )
 
-    return freqs, poisson_ratio, density_params, layer_bounds, param_bounds, true_model
+    return freqs, poisson_ratio, density_params, param_bounds, true_model
 
 
 def run(
     n_chains=2,
     n_data=10,
     n_layers=10,
-    model_depth=20,
-    sigma_pd=0.0001,
+    sigma_pd_true=0.0001,
     n_bins=200,
     n_burn=10000,
     n_keep=2000,
@@ -100,26 +106,21 @@ def run(
     """
 
     # declare parameters needed for inversion; generate true model
-    freqs, poisson_ratio, density_params, layer_bounds, param_bounds, true_model = (
-        setup_scene(
-            n_chains,
-            n_layers,
-            n_data,
-            model_depth,
-            sigma_pd,
-        )
+    freqs, poisson_ratio, density_params, param_bounds, true_model = setup_scene(
+        n_layers,
+        n_data,
+        sigma_pd_true,
     )
 
+    # plot_results(true_model)
     # run inversion
     inversion = Inversion(
         n_chains,
         n_data,
         n_layers,
-        layer_bounds,
         param_bounds,
         poisson_ratio,
         density_params,
-        sigma_pd,
         freqs,
         true_model.phase_vel_obs,
         n_bins,
@@ -127,14 +128,14 @@ def run(
         n_keep,
         n_rot,
     )
-    # inversion.random_walk()
+    inversion.random_walk()
 
     # plots and comparing results to true model
-    plot_results(true_model)
+    # plot_results(true_model)
 
 
 def plot_results(true_model):
-    # plot true s and p velocitys, plot observed phase velocity, plot density profile.
+    # plot true s and p velocities, plot observed phase velocity, plot density profile.
     plot_scene(true_model)
 
     # plot convergence...
@@ -147,47 +148,67 @@ def plot_results(true_model):
 
 
 def plot_scene(true_model):
-    depths = np.cumsum(true_model.thickness)
+    # *** get rid of repetition in plotting ***
+    depths = np.cumsum(true_model.thickness) * 1000  # in m
 
-    fig, (ax1, ax2) = plt.subplots(ncols=2, sharey=True)
-    # plot true model velocities
-    ax1.plot(true_model.vel_s, depths, label="s velocity")
-    ax1.plot(true_model.vel_p, depths, label="p velocity")
+    fig, (ax1, ax2, ax3) = plt.subplots(ncols=3, sharey=True, figsize=(12, 6))
+    # plot true data
+    data_phase_vel = true_model.phase_vel_true
+    # data_depths = data_phase_vel / true_model.freqs  # *** check units ***
+    # *** use the actual velocity ***
+    data_depths = 3.5 / true_model.freqs  # *** check units ***
+    ax1.plot(data_phase_vel, data_depths * 1000, label="true phase velocity")
+
+    # plot observed data
+    data_phase_vel = true_model.phase_vel_obs
+    # data_depths = data_phase_vel / true_model.freqs  # *** check units ***
+    data_depths = 3.5 / true_model.freqs  # *** check units ***
+    # ax1.plot(data_phase_vel, data_depths * 1000, label="observed phase velocity")
+
     ax1.invert_yaxis()
     ax1.set_xlabel("km/s")
-    ax1.set_ylabel("depth (km)")
+    ax1.ticklabel_format(style="scientific", scilimits=(-3, 3))
+    ax1.set_ylabel("depth (m)")
     ax1.set_title("sigma_pd=" + str(true_model.sigma_pd))
     ax1.legend(loc="best")
     [ax1.axhline(y=d, c="black", alpha=0.25) for d in depths]
 
-    ax2.plot(true_model.density, depths, label="density")
-    ax2.set_xlabel("g/cm^3")
+    # plot true model velocities
+    ax2.plot(true_model.vel_s, depths, label="s velocity")
+    ax2.plot(true_model.vel_p, depths, label="p velocity")
+
+    ax2.ticklabel_format(style="scientific", scilimits=(-3, 3))
+    ax2.set_xlabel("km/s")
     ax2.legend(loc="best")
     [ax2.axhline(y=d, c="black", alpha=0.25) for d in depths]
 
-    # plot phase velocity against frequency
-    # ax1.plot(true_model.phase_vel_obs, depths, label="phase velocity")
+    # plot density depth profile
+    ax3.plot(true_model.density, depths, label="density")
+    ax3.ticklabel_format(style="scientific", scilimits=(-3, 3))
+    ax3.set_xlabel("g/cm^3")
+    ax3.legend(loc="best")
+    [ax3.axhline(y=d, c="black", alpha=0.25) for d in depths]
 
-    plt.tight_layout()
-    plt.show()
+    fig.tight_layout()
+    # plt.show()
     # save to file
+    # fig.savefig("./figures/scene.png")
 
 
 def plot_histograms(inversion):
-
-    for chain in inversion.chains:
-        pass
+    # reading back from the file....
+    pass
 
 
 if __name__ == "__main__":
+
     run(
         # n_chains=2,
-        # n_data=10,
+        n_data=15,
         # n_layers=10,
-        # model_depth=20,
-        # sigma_pd=0.0001,
+        sigma_pd_true=0.001,
         # n_bins=200,
-        # n_burn=10000,
-        # n_keep=2000,
-        # n_rot=40000,
+        n_burn=100,
+        n_keep=20,
+        n_rot=400,
     )
