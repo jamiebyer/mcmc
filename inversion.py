@@ -57,7 +57,8 @@ class Inversion:
         self.swap_acc = 0
         self.swap_prop = 0
 
-        self.stored_results = {}
+        self.stored_results = {"params": [], "logL": [], "beta": []}
+        # self.stored_results = {"params": [], "logL": [], "beta": [], "acc": []}
 
     def get_betas(self, dTlog=1.15):
         """
@@ -80,7 +81,7 @@ class Inversion:
         inds = np.arange(n_temps_frac, n_temps)
         betas[inds] = 1.0 / dTlog**inds
         # T = 1.0 / beta
-
+        betas = [0.5, 1]  # *** hard coded beta for now ***
         return betas
 
     def initialize_chains(
@@ -112,29 +113,23 @@ class Inversion:
             chains.append(model)
         self.chains = chains
 
-    def random_walk(self, hist_conv=0.05, out_dir="./out/"):
+    def random_walk(self, hist_conv, out_dir):
         """
         :param hist_conv:
         """
         for n_steps in range(self.n_mcmc):
+            print(n_steps)
             # PARALLEL COMPUTING
             delayed_results = []
             for ind in range(self.n_chains):
                 # *** a little concerned this could be overlapping and fetching the wrong model ***
                 chain_model = self.chains[ind]  # deepcopy(self.chains[ind])
-                updated_model = dask.delayed(self.perform_step)(chain_model)
+                update_cov_mat = n_steps <= self.n_burn_in
+                end_burn_in = n_steps == self.n_burn_in
+                updated_model = dask.delayed(self.perform_step)(
+                    chain_model, update_cov_mat, end_burn_in
+                )
                 delayed_results.append(updated_model)
-
-                if n_steps == self.n_burn_in:
-                    # when burn in finishes, update values of u, pcsd
-                    # *** check that this cov_mat is up to date here ***
-                    self.rot_mat, s, _ = np.linalg.svd(
-                        chain_model.cov_mat
-                    )  # rotate it to its Singular Value Decomposition
-                    self.sigma_model = np.sqrt(s)
-
-                if self.n_mcmc >= self.n_burn_in:
-                    self.n_keep += 1  # keeping track of the idex to write into a file
 
             self.chains = dask.compute(*delayed_results)
 
@@ -144,18 +139,17 @@ class Inversion:
             # Tempering exchange move
             self.perform_tempering_swap()
 
-            save_samples, write_samples, create_file = False, False, False
+            save_samples, write_samples = False, False
             if n_steps >= self.n_burn_in:
-                create_file = n_steps == self.n_burn_in
                 save_samples = True
                 # save a subset of the models
                 write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
             # saving sample and write to file
             self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
-            self.store_samples(write_samples, out_dir, create_file)
+            self.store_samples(write_samples, end_burn_in, out_dir)
 
-    def perform_step(self, chain_model):
+    def perform_step(self, chain_model, update_cov_mat, end_burn_in):
         """
         update one chain model.
         perturb each param on the chain model and accept each new model with a likelihood.
@@ -167,9 +161,14 @@ class Inversion:
         # *** might move perturb params to inversion class. clean this up ***
         # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
         chain_model.perturb_params()
+
+        # *** we are collecting the cov_mats for each individual burn-in model... ***
         # cov mat on inversion or model class?
-        chain_model.update_covariance_matrix()
+        if update_cov_mat:
+            chain_model.update_covariance_matrix(end_burn_in)
+
         # only update the histogram if it's being saved
+        # *** need to add hist to saved results? ***
         chain_model.update_model_hist()
 
         return chain_model
@@ -234,23 +233,26 @@ class Inversion:
             self.hist_diff_plot.append(hist_diff)
 
         # *** should be collecting this info before hist is converged, right? ***
+        # *** use store_samples function for the saving
         if (hist_diff < hist_conv) & enough_rotations:
-            # collect results
-            keys = ["logL", "m", "d", "acc"]
+            # collect results (collect last remaining results?)
+            # *** save hist_diff too ***
+            # keys = ["logL", "m", "d"]
+            # keys = ["logL", "m", "d", "acc"]
             # logLkeep2, mkeep2, dkeep2, acc, hist_d_plot, covariance matrix
-            for key in keys():
-                df_dict = {}
-                for ind in range(self.n_chains):
-                    df_dict[key] = self.chains[ind].saved_results[key]
-                df = pd.DataFrame(df_dict)
-                df.to_csv(
-                    out_dir + key + ".csv",
-                )
+            # for key in keys():
+            #    df_dict = {}
+            #    for ind in range(self.n_chains):
+            #        df_dict[key] = self.chains[ind].saved_results[key]
+            #    df = pd.DataFrame(df_dict)
+            #    df.to_csv(
+            #        out_dir + key + ".csv",
+            #    )
 
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
-    def store_samples(self, write_samples, out_dir, create_file):
+    def store_samples(self, write_samples, create_file, out_dir):
         """
         Write out to csv in chunks of size n_keep.
         """
@@ -261,21 +263,22 @@ class Inversion:
         for chain in self.chains:
             if chain.beta == 1:
                 # maybe move this to model class
-                self.stored_results["params"].append(chain.params)
+                self.stored_results["params"].append(chain.model_params)
                 self.stored_results["logL"].append(chain.logL)
                 self.stored_results["beta"].append(chain.beta)
-                self.stored_results["acc"].append(chain.acc)
+                # self.stored_results["acc"].append(chain.acc)
 
         if write_samples:
-            print("write sample")
             # if it is the first time saving, write to file with mode="w"
             # otherwise append with mode="a"
-
             df = pd.DataFrame(
                 self.stored_results  # , columns=["params", "logL", "beta", "acc"]
             )
             df.to_csv(
-                out_dir + "inversion_results.csv",
+                out_dir + ".csv",
                 mode="w" if create_file else "a",
                 header=create_file,
             )
+            # clear stored results after saving...
+            self.stored_results = {"params": [], "logL": [], "beta": []}
+            # self.stored_results = {"params": [], "logL": [], "beta": [], "acc": []}

@@ -171,7 +171,8 @@ class Model:
             # ell = Ellipticity(*velocity_model.T)
             phase_velocity = pd_rayleigh.velocity
             return phase_velocity
-        except DispersionError as e:
+        except (DispersionError, ZeroDivisionError) as e:
+            # *** look into these errors and see what kind of parameters are causing them ***
             raise e
 
 
@@ -208,7 +209,7 @@ class TrueModel(Model):
             try:
                 self.phase_vel_true = self.forward_model(model_params)
                 valid_params = True
-            except DispersionError:
+            except (DispersionError, ZeroDivisionError):
                 pass
 
         sigma_pd = model_params[-1]  # ***
@@ -274,21 +275,10 @@ class ChainModel(Model):
             try:
                 self.logL = self.get_likelihood(model_params)  # set model likelihood
                 valid_params = True
-            except DispersionError:
+            except (DispersionError, ZeroDivisionError):
                 pass
 
         return model_params
-
-    def validate_params(params, param_bounds):
-        """
-        check that the given parameters are valid and within bounds
-
-        :param params: model params to check
-        :param param_bounds: min, max for each param
-        """
-        return np.all(params >= param_bounds[:, 0]) and np.all(
-            params <= param_bounds[:, 1]
-        )
 
     def perturb_params(self, scale_factor=1.3):
         """
@@ -299,7 +289,6 @@ class ChainModel(Model):
         :param phase_vel_obs: observed data, used to calculate likelihood.
         :param scale_factor:
         """
-
         # normalizing, rotating
         test_params = (self.model_params - self.param_bounds[:, 0]) / self.param_bounds[
             :, 2
@@ -318,25 +307,36 @@ class ChainModel(Model):
         test_params = np.matmul(self.rot_mat, test_params)
         test_params = self.param_bounds[:, 0] + (test_params * self.param_bounds[:, 2])
 
-        # *** this is incorrect... ***
-        # loop over params and perturb
-        for ind in range(self.n_params):
-            # validate test params
-            if not ChainModel.validate_params(test_params[ind], self.param_bounds):
-                continue
+        # boolean array of valid params
+        valid_params = (test_params >= self.param_bounds[:, 0]) & (
+            test_params <= self.param_bounds[:, 1]
+        )
 
+        # loop over params and perturb
+        for ind in np.arange(self.n_params)[valid_params]:
             # calculate new likelihood
-            logL_new = self.get_likelihood(
-                test_params,
-            )
+            try:
+                logL_new = self.get_likelihood(
+                    test_params,
+                )
+            except (DispersionError, ZeroDivisionError):
+                print("errror")
+                continue
 
             # Compute likelihood ratio in log space:
             dlogL = logL_new - self.logL
+            # print("\ndlogL, ", dlogL)
+
+            # *** ...
+            if dlogL == 0:
+                continue
+
             xi = np.random.rand(1)
             # Apply MH criterion (accept/reject)
             if xi <= np.exp(dlogL):
+                print("accept: ", self.model_params[ind], test_params[ind])
+                self.model_params[ind] = test_params[ind]
                 self.logL = logL_new
-                self.params = test_params
 
     def get_derivatives(
         self,
@@ -396,7 +396,7 @@ class ChainModel(Model):
                             / (2 * step_sizes[param_ind, size_ind]),
                         ),
                     )
-                except DispersionError as e:
+                except (DispersionError, ZeroDivisionError) as e:
                     print(e)
                     # pass
 
@@ -527,8 +527,8 @@ class ChainModel(Model):
             )
             return np.sum(logL)
 
-        except DispersionError as e:
-            return e
+        except (DispersionError, ZeroDivisionError) as e:
+            raise e
 
     def update_model_hist(self):
         """
@@ -542,12 +542,12 @@ class ChainModel(Model):
             idx_diff = np.argmin(abs(edge - self.model_params[ind]))
             self.model_hist[idx_diff, ind] += 1
 
-    def update_covariance_matrix(self):
+    def update_covariance_matrix(self, end_burn_in):
         """
         :param param_bounds: min, max, range of params; used to normalize model params.
         """
 
-        # *** covariance matrix is a running sum... collecting from burn in stage. cov mat linear estrimate during burn ibn, switch to running
+        # *** covariance matrix is a running sum... collecting from burn in stage. cov mat linear estrimate during burn in, switch to running
         # sum at end of burn in and then keep static? could keep updating and diminish the effect ***
 
         # *** rename params ***
@@ -556,6 +556,8 @@ class ChainModel(Model):
         # does the numpy cov function help?
 
         # these variables could just be local..? does it matter?
+
+        # *** make sure there are no nans in output matrix ***
 
         # normalizing
         self.normalized_model = (
@@ -571,13 +573,22 @@ class ChainModel(Model):
             np.transpose(self.normalized_model - self.mean_model),
             self.normalized_model - self.mean_model,
         )
+
         # calculating covariance matrix from samples
         self.cov_mat = self.cov_mat_sum / self.n_cov
 
+        # *** simplify ***
         # dividing the covariance matrix by the auto-correlation of the params, and data
-        for param_ind in range(self.n_params):
-            for data_ind in range(self.n_data):
-                self.cov_mat[param_ind, data_ind] /= np.sqrt(  # invalid scalar divide
-                    self.cov_mat[param_ind, param_ind]
-                    * self.cov_mat[data_ind, data_ind]
+        for row in range(self.n_params):
+            for col in range(self.n_params):
+                self.cov_mat[row, col] /= np.sqrt(  # invalid scalar divide
+                    self.cov_mat[row, row] * self.cov_mat[col, col]
                 )
+
+        if end_burn_in:
+            # when burn in finishes, update values of u, pcsd
+            # *** this should only happen once... right?  set values after burn-in and then keep them constant...***
+            self.rot_mat, s, _ = np.linalg.svd(
+                self.cov_mat
+            )  # rotate it to its Singular Value Decomposition
+            self.sigma_model = np.sqrt(s)

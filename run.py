@@ -4,6 +4,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from scipy import interpolate
 from model import Model, TrueModel, ChainModel
+import time
 
 # TODO:
 # - add environment
@@ -94,6 +95,7 @@ def run(
     n_burn=10000,
     n_keep=2000,
     n_rot=40000,
+    out_dir="/out/inversion_results",
 ):
     """
     Run inversion.
@@ -128,7 +130,9 @@ def run(
         n_keep,
         n_rot,
     )
-    inversion.random_walk()
+    # should any of those params just be in random walk?
+    # *** hist_conv values ***
+    inversion.random_walk(hist_conv=0.05, out_dir=out_dir)
 
     # plots and comparing results to true model
     # plot_results(true_model)
@@ -200,15 +204,39 @@ def plot_histograms(inversion):
     pass
 
 
-if __name__ == "__main__":
+def plot_inversion_results(out_dir):
+    inversion_results = pd.read_csv(out_dir + ".csv")
 
+    # plot params
+    # params_results = inversion_results["params"]
+    # plt.plot(params_results)
+
+    # plot logL
+    logL_results = inversion_results["params"]
+    plt.plot(logL_results)
+    plt.show()
+    # save to file
+    # fig.savefig("./figures/scene.png")
+
+
+if __name__ == "__main__":
+    out_dir = "./out/inversion_results_" + str(time.time())
+    # """
     run(
         # n_chains=2,
         n_data=15,
         # n_layers=10,
         sigma_pd_true=0.001,
         # n_bins=200,
-        n_burn=100,
-        n_keep=20,
-        n_rot=400,
+        n_burn=1000,
+        n_keep=200,
+        n_rot=4000,
+        out_dir=out_dir,
     )
+
+    """
+
+    plot_inversion_results(
+        out_dir=r"/home/jbyer/Documents/school/grad/research/hvsr/hvsr/out/inversion_results_1722542488.3892229"
+    )
+    """
