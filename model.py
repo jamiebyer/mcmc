@@ -137,7 +137,10 @@ class Model:
         vs_func = interpolate.interp1d(radius, prem_vs)
         vel_s = vs_func(depths)
 
+        # vel_s = [3.50, 3.40, 3.50, 3.80, 4.20, 4.50, 4.70, 4.80, 4.75, 4.75]
+
         model_params = np.concatenate((thickness, vel_s, [sigma_pd]))
+
         return model_params
 
     def get_birch_params(self):
@@ -172,6 +175,8 @@ class Model:
             phase_velocity = pd_rayleigh.velocity
             return phase_velocity
         except (DispersionError, ZeroDivisionError) as e:
+            # failed to find root for fundamental mode
+            # division by zero
             # *** look into these errors and see what kind of parameters are causing them ***
             raise e
 
@@ -203,6 +208,8 @@ class TrueModel(Model):
         :param density_params: Birch params to simulate density profile.
         """
         valid_params = False
+        # *** i don't want this try-except here. validate without calling forward_model ***
+        # *** should know if params are valid before inputing into forward_model ***
         while not valid_params:
             model_params = super().generate_model_params()
             # get simulated true phase dispersion
@@ -210,8 +217,21 @@ class TrueModel(Model):
                 self.phase_vel_true = self.forward_model(model_params)
                 valid_params = True
             except (DispersionError, ZeroDivisionError):
-                pass
+                continue
 
+        # *** test values:
+        model_params[self.n_layers : 2 * self.n_layers] = [
+            3.50,
+            3.40,
+            3.50,
+            3.80,
+            4.20,
+            4.50,
+            4.70,
+            4.80,
+            4.75,
+            4.75,
+        ]
         sigma_pd = model_params[-1]  # ***
         # generate simulated observed data by adding noise to true values.
         self.phase_vel_obs = self.phase_vel_true + sigma_pd * np.random.randn(
@@ -272,6 +292,7 @@ class ChainModel(Model):
         while not valid_params:
             model_params = super().generate_model_params()
             # get simulated true phase dispersion
+            # *** ... if there's an error here, it shouldn't be the starting model... ***
             try:
                 self.logL = self.get_likelihood(model_params)  # set model likelihood
                 valid_params = True
@@ -311,6 +332,7 @@ class ChainModel(Model):
         valid_params = (test_params >= self.param_bounds[:, 0]) & (
             test_params <= self.param_bounds[:, 1]
         )
+        print("valid params ", np.sum(valid_params))
 
         # loop over params and perturb
         for ind in np.arange(self.n_params)[valid_params]:
@@ -320,13 +342,10 @@ class ChainModel(Model):
                     test_params,
                 )
             except (DispersionError, ZeroDivisionError):
-                print("errror")
                 continue
 
             # Compute likelihood ratio in log space:
             dlogL = logL_new - self.logL
-            # print("\ndlogL, ", dlogL)
-
             # *** ...
             if dlogL == 0:
                 continue
@@ -334,7 +353,7 @@ class ChainModel(Model):
             xi = np.random.rand(1)
             # Apply MH criterion (accept/reject)
             if xi <= np.exp(dlogL):
-                print("accept: ", self.model_params[ind], test_params[ind])
+                print("accept")
                 self.model_params[ind] = test_params[ind]
                 self.logL = logL_new
 

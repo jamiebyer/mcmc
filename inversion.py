@@ -4,6 +4,7 @@ import sys
 import dask
 from model import ChainModel, Model
 from copy import deepcopy
+from dask.distributed import Client
 
 
 class Inversion:
@@ -113,43 +114,46 @@ class Inversion:
             chains.append(model)
         self.chains = chains
 
-    def random_walk(self, hist_conv, out_dir):
+    async def random_walk(self, hist_conv, out_dir):
         """
         :param hist_conv:
         """
-        for n_steps in range(self.n_mcmc):
-            print(n_steps)
-            # PARALLEL COMPUTING
-            delayed_results = []
-            for ind in range(self.n_chains):
-                # *** a little concerned this could be overlapping and fetching the wrong model ***
-                chain_model = self.chains[ind]  # deepcopy(self.chains[ind])
-                update_cov_mat = n_steps <= self.n_burn_in
-                end_burn_in = n_steps == self.n_burn_in
-                updated_model = dask.delayed(self.perform_step)(
-                    chain_model, update_cov_mat, end_burn_in
-                )
-                delayed_results.append(updated_model)
+        async with Client(asynchronous=True) as client:
+            for n_steps in range(self.n_mcmc):
+                print("\n", n_steps)
+                # PARALLEL COMPUTING
+                delayed_results = []
+                for ind in range(self.n_chains):
+                    chain_model = self.chains[ind]
+                    update_cov_mat = n_steps <= self.n_burn_in
+                    end_burn_in = n_steps == self.n_burn_in
 
-            self.chains = dask.compute(*delayed_results)
+                    updated_model = client.submit(
+                        self.perform_step, chain_model, update_cov_mat, end_burn_in
+                    )
+                    delayed_results.append(updated_model)
 
-            # prop[source_1 - 1, :] = prop_acc[0, :]
-            # acc[source_1 - 1, :] = prop_acc[1, :]
+                # synchronizing the separate chains
+                self.chains = await client.gather(delayed_results)
 
-            # Tempering exchange move
-            self.perform_tempering_swap()
+                # prop[source_1 - 1, :] = prop_acc[0, :]
+                # acc[source_1 - 1, :] = prop_acc[1, :]
 
-            save_samples, write_samples = False, False
-            if n_steps >= self.n_burn_in:
-                save_samples = True
-                # save a subset of the models
-                write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
+                # Tempering exchange move
+                self.perform_tempering_swap()
 
-            # saving sample and write to file
-            self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
-            self.store_samples(write_samples, end_burn_in, out_dir)
+                save_samples, write_samples = False, False
+                if n_steps >= self.n_burn_in:
+                    save_samples = True
+                    # save a subset of the models
+                    write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
 
-    def perform_step(self, chain_model, update_cov_mat, end_burn_in):
+                # saving sample and write to file
+                self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
+                self.store_samples(write_samples, end_burn_in, out_dir)
+        # await client.close()
+
+    async def perform_step(self, chain_model, update_cov_mat, end_burn_in):
         """
         update one chain model.
         perturb each param on the chain model and accept each new model with a likelihood.
@@ -256,7 +260,7 @@ class Inversion:
         """
         Write out to csv in chunks of size n_keep.
         """
-        # use dask to save?
+        # *** use dask to save instead of pandas? ***
 
         # saving the chain model with beta of 1
 

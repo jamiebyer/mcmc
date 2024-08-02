@@ -5,6 +5,7 @@ import pandas as pd
 from scipy import interpolate
 from model import Model, TrueModel, ChainModel
 import time
+import asyncio
 
 # TODO:
 # - add environment
@@ -132,7 +133,10 @@ def run(
     )
     # should any of those params just be in random walk?
     # *** hist_conv values ***
-    inversion.random_walk(hist_conv=0.05, out_dir=out_dir)
+
+    asyncio.get_event_loop().run_until_complete(
+        inversion.random_walk(hist_conv=0.05, out_dir=out_dir)
+    )
 
     # plots and comparing results to true model
     # plot_results(true_model)
