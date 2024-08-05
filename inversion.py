@@ -5,6 +5,7 @@ import dask
 from model import ChainModel, Model
 from copy import deepcopy
 from dask.distributed import Client
+import dask.dataframe as dd
 
 
 class Inversion:
@@ -142,16 +143,23 @@ class Inversion:
                 # Tempering exchange move
                 self.perform_tempering_swap()
 
-                save_samples, write_samples = False, False
-                if n_steps >= self.n_burn_in:
+                save_samples, write_samples = (
+                    False,
+                    False,
+                )
+                # if n_steps >= self.n_burn_in:
+                if n_steps >= self.n_keep:  # *** testing
                     save_samples = True
                     # save a subset of the models
-                    write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
+                    # write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
+                    write_samples = (np.mod(n_steps, self.n_keep)) == 0
 
                 # saving sample and write to file
                 self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
+
+                # *** just for testing
+                end_burn_in = n_steps == self.n_keep  # for test, save burn-in
                 self.store_samples(write_samples, end_burn_in, out_dir)
-        # await client.close()
 
     async def perform_step(self, chain_model, update_cov_mat, end_burn_in):
         """
@@ -263,7 +271,6 @@ class Inversion:
         # *** use dask to save instead of pandas? ***
 
         # saving the chain model with beta of 1
-
         for chain in self.chains:
             if chain.beta == 1:
                 # maybe move this to model class
@@ -275,9 +282,14 @@ class Inversion:
         if write_samples:
             # if it is the first time saving, write to file with mode="w"
             # otherwise append with mode="a"
-            df = pd.DataFrame(
+
+            df = dd.DataFrame(
                 self.stored_results  # , columns=["params", "logL", "beta", "acc"]
             )
+            # df = dd.DataFrame.from_dict(
+            #     self.stored_results  # , columns=["params", "logL", "beta", "acc"]
+            # )
+
             df.to_csv(
                 out_dir + ".csv",
                 mode="w" if create_file else "a",

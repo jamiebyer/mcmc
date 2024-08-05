@@ -6,6 +6,9 @@ from scipy import interpolate
 from model import Model, TrueModel, ChainModel
 import time
 import asyncio
+import dask.dataframe as dd
+import ast
+import os
 
 # TODO:
 # - add environment
@@ -198,34 +201,89 @@ def plot_scene(true_model):
     [ax3.axhline(y=d, c="black", alpha=0.25) for d in depths]
 
     fig.tight_layout()
-    # plt.show()
     # save to file
-    # fig.savefig("./figures/scene.png")
-
-
-def plot_histograms(inversion):
-    # reading back from the file....
-    pass
+    fig.savefig("./figures/scene.png")
 
 
 def plot_inversion_results(out_dir):
     inversion_results = pd.read_csv(out_dir + ".csv")
 
-    # plot params
-    # params_results = inversion_results["params"]
-    # plt.plot(params_results)
+    # *** want to read and write lists without doing this conversion. ***
+    # *** or save parameters separately...
+    params_results = inversion_results["params"]
+    params_results = (
+        params_results.str.lstrip("[")
+        .str.rstrip("]")
+        .str.split()
+        .apply(lambda x: list(map(float, x)))
+        # .apply(ast.literal_eval)
+    )
+    params_results = np.array([np.array(p) for p in params_results]).T
+
+    # figure directory
+    figure_path = out_dir + "/figures"
+    if not os.path.exists(out_dir):
+        os.mkdir(out_dir)
+    if not os.path.exists(figure_path):
+        os.mkdir(figure_path)
+
+    # create figures
+    thickness = params_results[:10] * 1000  # convert from km to m
+    vel_s = params_results[10:20]
+    sigma_pd = params_results[-1]
+
+    # plt.gca().ticklabel_format(style="sci", scilimits=(0, 0))
+
+    rows, cols = 2, 5
+    # plot histogram for thickness parameters
+    fig1 = plt.figure(figsize=(10, 6))
+    for row in range(rows):
+        for col in range(cols):
+            ind = (row * cols) + col
+            plt.subplot(rows, cols, ind + 1)
+            plt.hist(thickness[ind])
+            plt.title("layer " + str(ind))
+            plt.gca().ticklabel_format(style="sci", scilimits=(-3, 3))
+
+    fig1.suptitle("layer thickness (m)")
+    fig1.tight_layout()
+    fig1.savefig(out_dir + "/figures/thickness.png")
+
+    # plot histogram for shear velocity
+    fig2 = plt.figure(figsize=(10, 6))
+    for row in range(rows):
+        for col in range(cols):
+            ind = (row * cols) + col
+            plt.subplot(rows, cols, ind + 1)
+            plt.hist(vel_s[ind])
+            plt.title("layer " + str(ind))
+            plt.gca().ticklabel_format(style="sci", scilimits=(-3, 3))
+
+    fig2.suptitle("layer shear velocity (km/s)")
+    fig2.tight_layout()
+    fig2.savefig(out_dir + "/figures/vel_s.png")
+
+    # plot histogram for sigma_pd
+    fig3 = plt.figure()
+    plt.hist(sigma_pd)
+    plt.gca().ticklabel_format(style="sci", scilimits=(-3, 3))
+    fig3.suptitle("sigma_pd")
+    fig3.tight_layout()
+    fig3.savefig(out_dir + "/figures/sigma_pd.png")
 
     # plot logL
-    logL_results = inversion_results["params"]
-    plt.plot(logL_results)
-    plt.show()
-    # save to file
-    # fig.savefig("./figures/scene.png")
+    fig4 = plt.figure()
+    logL_results = inversion_results["logL"]
+    logL_results.hist()
+    plt.gca().ticklabel_format(style="sci", scilimits=(-3, 3))
+    fig4.suptitle("logL")
+    fig4.tight_layout()
+    fig4.savefig(out_dir + "/figures/logL.png")
 
 
 if __name__ == "__main__":
+    """
     out_dir = "./out/inversion_results_" + str(time.time())
-    # """
     run(
         # n_chains=2,
         n_data=15,
@@ -239,8 +297,10 @@ if __name__ == "__main__":
     )
 
     """
-
+    # plot_results()
     plot_inversion_results(
-        out_dir=r"/home/jbyer/Documents/school/grad/research/hvsr/hvsr/out/inversion_results_1722542488.3892229"
+        out_dir=r"/home/jbyer/Documents/school/grad/research/hvsr/hvsr/out/inversion_results_1722619055.1016881"
     )
-    """
+
+    # plot_ending_model()
+    # """
