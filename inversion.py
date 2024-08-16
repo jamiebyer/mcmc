@@ -2,10 +2,20 @@ import numpy as np
 import pandas as pd
 import sys
 import dask
-from model import ChainModel, Model
-from copy import deepcopy
+from model import ChainModel
 from dask.distributed import Client
 import dask.dataframe as dd
+import os
+import xarray as xr
+
+"""
+TODO:
+- add back NCHAINTHIN (randomized?)
+- order of params..?
+- rotation
+- save acceptance rate
+- change beta steps vals based on acceptance rate
+"""
 
 
 class Inversion:
@@ -59,8 +69,24 @@ class Inversion:
         self.swap_acc = 0
         self.swap_prop = 0
 
-        self.stored_results = {"params": [], "logL": [], "beta": []}
+        # self.stored_results = {"params": [], "logL": [], "beta": []}
+        self.stored_results = {
+            "params": [],
+            "logL": [],
+            "beta": [],
+            "rot_mat": [],
+            "sigma_pd": [],
+        }
         # self.stored_results = {"params": [], "logL": [], "beta": [], "acc": []}
+
+        n_params = param_bounds.shape[0]
+        self.ds_results = xr.Dataset(
+            coords={
+                "step": np.zeros(self.n_keep),
+                "param": np.arange(n_params),
+            },
+            # attrs={}
+        )
 
     def get_betas(self, dTlog=1.15):
         """
@@ -122,15 +148,34 @@ class Inversion:
         async with Client(asynchronous=True) as client:
             for n_steps in range(self.n_mcmc):
                 print("\n", n_steps)
+                save_burn_in = True
+                update_cov_mat = n_steps >= self.n_burn_in
+                if save_burn_in:
+                    save_samples = True
+                    write_samples = (n_steps >= self.n_keep - 1) and (
+                        (np.mod(n_steps + 1, self.n_keep)) == 0
+                    )
+                    update_rot_mat = (
+                        write_samples
+                        and (n_steps > self.n_burn_in)
+                        and n_steps != self.n_keep
+                    )
+                    print(write_samples, update_rot_mat)
+                else:
+                    save_samples = update_cov_mat
+                    # n_keep doesn't need to be same freq as updating rot_mat
+                    write_samples = (n_steps >= self.n_burn_in - 1) and (
+                        np.mod(n_steps + 1, self.n_keep)
+                    ) == 0
+                    update_rot_mat = write_samples and n_steps != self.n_keep
+
                 # PARALLEL COMPUTING
                 delayed_results = []
                 for ind in range(self.n_chains):
                     chain_model = self.chains[ind]
-                    update_cov_mat = n_steps <= self.n_burn_in
-                    end_burn_in = n_steps == self.n_burn_in
 
                     updated_model = client.submit(
-                        self.perform_step, chain_model, update_cov_mat, end_burn_in
+                        self.perform_step, chain_model, update_cov_mat, update_rot_mat
                     )
                     delayed_results.append(updated_model)
 
@@ -143,25 +188,15 @@ class Inversion:
                 # Tempering exchange move
                 self.perform_tempering_swap()
 
-                save_samples, write_samples = (
-                    False,
-                    False,
-                )
-                # if n_steps >= self.n_burn_in:
-                if n_steps >= self.n_keep:  # *** testing
-                    save_samples = True
-                    # save a subset of the models
-                    # write_samples = (np.mod(n_steps, 5 * self.n_keep)) == 0
-                    write_samples = (np.mod(n_steps, self.n_keep)) == 0
-
                 # saving sample and write to file
                 self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
 
                 # *** just for testing
                 end_burn_in = n_steps == self.n_keep  # for test, save burn-in
-                self.store_samples(write_samples, end_burn_in, out_dir)
 
-    async def perform_step(self, chain_model, update_cov_mat, end_burn_in):
+                self.store_samples(n_steps, write_samples, end_burn_in, out_dir)
+
+    async def perform_step(self, chain_model, update_cov_mat, update_rot_mat):
         """
         update one chain model.
         perturb each param on the chain model and accept each new model with a likelihood.
@@ -174,10 +209,9 @@ class Inversion:
         # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
         chain_model.perturb_params()
 
-        # *** we are collecting the cov_mats for each individual burn-in model... ***
-        # cov mat on inversion or model class?
+        # start saving cov_mat after burn-in
         if update_cov_mat:
-            chain_model.update_covariance_matrix(end_burn_in)
+            chain_model.update_covariance_matrix(update_rot_mat)
 
         # only update the histogram if it's being saved
         # *** need to add hist to saved results? ***
@@ -264,12 +298,10 @@ class Inversion:
             # TERMINATE!
             sys.exit("Converged, terminate.")
 
-    def store_samples(self, write_samples, create_file, out_dir):
+    def store_samples(self, n_steps, write_samples, create_file, out_dir):
         """
         Write out to csv in chunks of size n_keep.
         """
-        # *** use dask to save instead of pandas? ***
-
         # saving the chain model with beta of 1
         for chain in self.chains:
             if chain.beta == 1:
@@ -277,24 +309,39 @@ class Inversion:
                 self.stored_results["params"].append(chain.model_params)
                 self.stored_results["logL"].append(chain.logL)
                 self.stored_results["beta"].append(chain.beta)
+                self.stored_results["rot_mat"].append(chain.rot_mat)
+                self.stored_results["sigma_pd"].append(chain.sigma_pd)
                 # self.stored_results["acc"].append(chain.acc)
 
         if write_samples:
             # if it is the first time saving, write to file with mode="w"
             # otherwise append with mode="a"
-
-            df = dd.DataFrame(
-                self.stored_results  # , columns=["params", "logL", "beta", "acc"]
+            self.ds_results.assign_coords(
+                {"step": np.arange(n_steps - self.n_keep, n_steps)}
             )
-            # df = dd.DataFrame.from_dict(
-            #     self.stored_results  # , columns=["params", "logL", "beta", "acc"]
-            # )
 
-            df.to_csv(
-                out_dir + ".csv",
-                mode="w" if create_file else "a",
-                header=create_file,
+            self.ds_results["params"] = (
+                ["step", "param"],
+                self.stored_results["params"],
             )
+            self.ds_results["logL"] = (["step"], self.stored_results["logL"])
+            self.ds_results["sigma_pd"] = (["step"], self.stored_results["sigma_pd"])
+            self.ds_results["rot_mat"] = (
+                ["step", "param", "param"],
+                self.stored_results["rot_mat"],
+            )
+
+            path_dir = os.path.dirname(out_dir)
+            if not os.path.isdir(path_dir):
+                os.mkdir(path_dir)
+
+            self.ds_results.to_zarr(out_dir, mode="w" if create_file else "a")
+
             # clear stored results after saving...
-            self.stored_results = {"params": [], "logL": [], "beta": []}
-            # self.stored_results = {"params": [], "logL": [], "beta": [], "acc": []}
+            self.stored_results = {
+                "params": [],
+                "logL": [],
+                "beta": [],
+                "rot_mat": [],
+                "sigma_pd": [],
+            }

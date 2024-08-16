@@ -4,6 +4,16 @@ from disba._exception import DispersionError
 import pandas as pd
 from scipy import interpolate
 
+"""
+TODO: 
+- generate true model better....
+- generate starting models differently than true model (maybe just random bounds)
+- actually might wanna try the opposite too.
+- fix: failed to find root for fundamental mode
+- fix: division by zero
+- fix: invalid value in log
+"""
+
 
 class Model:
     def __init__(
@@ -332,7 +342,6 @@ class ChainModel(Model):
         valid_params = (test_params >= self.param_bounds[:, 0]) & (
             test_params <= self.param_bounds[:, 1]
         )
-        print("valid params ", np.sum(valid_params))
 
         # loop over params and perturb
         for ind in np.arange(self.n_params)[valid_params]:
@@ -353,7 +362,6 @@ class ChainModel(Model):
             xi = np.random.rand(1)
             # Apply MH criterion (accept/reject)
             if xi <= np.exp(dlogL):
-                print("accept")
                 self.model_params[ind] = test_params[ind]
                 self.logL = logL_new
 
@@ -561,7 +569,7 @@ class ChainModel(Model):
             idx_diff = np.argmin(abs(edge - self.model_params[ind]))
             self.model_hist[idx_diff, ind] += 1
 
-    def update_covariance_matrix(self, end_burn_in):
+    def update_covariance_matrix(self, update_rot_mat):
         """
         :param param_bounds: min, max, range of params; used to normalize model params.
         """
@@ -603,11 +611,10 @@ class ChainModel(Model):
                 self.cov_mat[row, col] /= np.sqrt(  # invalid scalar divide
                     self.cov_mat[row, row] * self.cov_mat[col, col]
                 )
-
-        if end_burn_in:
-            # when burn in finishes, update values of u, pcsd
-            # *** this should only happen once... right?  set values after burn-in and then keep them constant...***
+        # after burn in is over, update covariance rot_mat and s from cov_mat
+        if update_rot_mat:
             self.rot_mat, s, _ = np.linalg.svd(
                 self.cov_mat
             )  # rotate it to its Singular Value Decomposition
             self.sigma_model = np.sqrt(s)
+            print(self.sigma_model)
