@@ -4,6 +4,7 @@ import pandas as pd
 import os
 import ast
 import re
+import xarray as xr
 
 
 """
@@ -11,6 +12,7 @@ TODO:
 - will saving the output as a dask array keep the formatting of the arrays?
     right now the reading in takes extra steps to reformat...
 """
+
 
 def plot_results(true_model):
     # plot true s and p velocities, plot observed phase velocity, plot density profile.
@@ -80,12 +82,12 @@ def plot_rotation_params(out_dir):
     rot_mat_results = inversion_results["rot_mat"]
     sigma_pd_results = inversion_results["sigma_pd"]
 
-    #print(rot_mat_results)
-    #print(rot_mat_results.str.lstrip("["))
+    # print(rot_mat_results)
+    # print(rot_mat_results.str.lstrip("["))
 
-    #print(rot_mat_results.str.lstrip("[").str.rstrip("]").str.split().head())
+    # print(rot_mat_results.str.lstrip("[").str.rstrip("]").str.split().head())
 
-    #rot_mat_results = np.array(ast.literal_eval(s))
+    # rot_mat_results = np.array(ast.literal_eval(s))
     """
     rot_mat_results = (
         rot_mat_results.str.lstrip("[")
@@ -95,24 +97,26 @@ def plot_rotation_params(out_dir):
     )
     """
 
-    rot_mat_results = rot_mat_results.str.replace("   ", ",").str.replace("  ", ",").str.replace(" ", ",")
-    
     rot_mat_results = (
-        rot_mat_results.apply(ast.literal_eval)
+        rot_mat_results.str.replace("   ", ",")
+        .str.replace("  ", ",")
+        .str.replace(" ", ",")
     )
 
-    #print(rot_mat_results)
+    rot_mat_results = rot_mat_results.apply(ast.literal_eval)
+
+    # print(rot_mat_results)
     rot_mat_results = np.array([np.array(r) for r in rot_mat_results]).T
-    
-    #print(rot_mat_results)
 
-    #print(rot_mat_results)
-    #print(sigma_pd_results)
+    # print(rot_mat_results)
 
-    #plt.plot(sigma_pd_results)
-    #plt.show()
+    # print(rot_mat_results)
+    # print(sigma_pd_results)
+
+    # plt.plot(sigma_pd_results)
+    # plt.show()
     rot_mag = [np.linalg.norm(mat) for mat in rot_mat_results]
-    
+
     print(np.min(rot_mag), np.max(rot_mag))
 
     plt.plot(rot_mag)
@@ -149,7 +153,7 @@ def plot_params_timeseries(out_dir):
 
     # plot timeseries for thickness parameters
     fig1 = plt.figure(figsize=(10, 6))
-    #for row in range(rows):
+    # for row in range(rows):
     plt.plot(thickness.T)
     plt.legend(np.arange(len(thickness)))
     plt.title("thickness")
@@ -164,7 +168,7 @@ def plot_params_timeseries(out_dir):
     plt.title("S velocity")
     plt.gca().ticklabel_format(style="sci", scilimits=(-3, 3))
 
-    #fig2.suptitle("layer shear velocity (km/s)")
+    # fig2.suptitle("layer shear velocity (km/s)")
     fig2.tight_layout()
     fig2.savefig(out_dir + "/figures/vel_s_timeseries.png")
 
@@ -262,16 +266,30 @@ def plot_params_hists(out_dir):
     fig4.savefig(out_dir + "/figures/logL_hist.png")
 
 
-if __name__ == "__main__":
-    out_dir = "./" + "out/inversion_results_1723665601.3777616.csv"
-    # plot_results()
-    plot_rotation_params(
-        out_dir=out_dir
-    )
+def plot_zarr_file(out_dir):
+    ds = xr.open_zarr(out_dir)
 
-    #plot_params_hists(
+    print(ds.step)
+
+    plt.subplot(2, 1, 1)
+    plt.imshow(ds.rot_mat.isel(step=0))
+    plt.colorbar()
+
+    plt.subplot(2, 1, 2)
+    plt.imshow(ds.rot_mat.isel(step=-1))
+    plt.colorbar()
+
+    # plt.plot(ds.params)
+    plt.show()
+
+
+if __name__ == "__main__":
+    out_dir = "./" + "out/inversion_results_1723861996.3231847"
+    # plot_results()
+    plot_zarr_file(out_dir=out_dir)
+
+    # plot_params_hists(
     #    out_dir=out_dir
-    #)
+    # )
 
     # plot_ending_model()
-

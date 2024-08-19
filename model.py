@@ -12,50 +12,39 @@ TODO:
 - fix: failed to find root for fundamental mode
 - fix: division by zero
 - fix: invalid value in log
+- generalize layer_bounds
+- check consistency with top/middle/bot of layer
 """
 
 
 class Model:
     def __init__(
         self,
-        n_layers,
-        n_data,
-        freqs,
+        n_layers: int,
+        n_data: int,
+        freqs: np.ndarray,
         param_bounds,
-        poisson_ratio,
-        density_params,
+        poisson_ratio: float,
+        density_params: list,
     ):
         """
-
+        :param n_layers: number of layers in the model.
+        :param n_data: number of data collected
         :param freqs: frequencies at which data was collected.
-        :param n_data: number of data (phase velocity)
-        :param sigma_pd: uncertainty in data (phase velocity)
-        :param layer_bounds: min, max bounds for layer thickness.
-        :param poisson_ratio:
-        :param density_params:
+        :param sigma_pd: uncertainty in data
+        :param param_bounds: array of (min, max, range) for each parameter. same length as n_params
+        :param poisson_ratio: value for poisson's ratio used to approximate vel_p from vel_s
+        :param density_params: birch params used to estimate the density profile of the model
         """
 
-        """
-        - input: layer_bounds, poisson, etc.
-        - when model created, generate params from bounds
-        - create velocity_model from generated params
-        - run forward model to get phase_vel from velocity_model
-
-        - ... get params from velocity model
-        - perturb params (vel_s, thickness, sigma_pd)
-        - generate the rest of params/ velocity model from poisson, etc.
-
-        - either switching between params and velocity, creating new lists, or 
-        - mapping between the indices.
-        """
         # read csvs
+        # *** stop using prem ***
         self.prem = pd.read_csv("./data/PREM500_IDV.csv")
 
         # *** double check which variables need to be on the class ***
         self.n_layers = n_layers
         self.n_data = n_data
-        self.freqs = freqs
-        self.periods = 1 / self.freqs
+        self.periods = 1 / freqs
 
         self.param_bounds = param_bounds
         self.poisson_ratio = poisson_ratio
@@ -118,51 +107,24 @@ class Model:
 
     def generate_model_params(self):
         """
-        generating true velocity model from PREM.
-
-        :param layer_bounds: [min, max] for layer thicknesses. (m)
-        :param poisson_ratio:
-        :param density_params: Birch params to simulate density profile.
+        generating initial params for new model.
         """
-        # generate sigma_pd...
-        sigma_pd = np.random.uniform(
-            self.sigma_pd_bounds[0], self.sigma_pd_bounds[1]
-        )  # validate that this is uniform
+        # can add other information to make a better initial model.
+        # make sure generating true model is different than method for generating starting models for chains
+        # could add a starting estimate for sigma_pd
 
-        # generate layer thicknesses
-        thickness = np.random.uniform(
-            self.layer_bounds[0], self.layer_bounds[1], self.n_layers
-        )  # validate that this is uniform
-        # this is setting the depth to be the bottom of each layer ***
-        depths = np.cumsum(thickness)
-        radius = self.prem['radius[unit="m"]'] / 1000  # m -> km
-
-        # *** initial vel_s is from prem... i guess could do this for the true model and then
-        # the others are generated within the bounds? ***
-        # get initial vs
-        # velocities are split into components
-        vsh = self.prem['Vsh[unit="m/s"]'] / 1000  # m/s -> km/s
-        vsv = self.prem['Vsv[unit="m/s"]'] / 1000  # m/s -> km/s
-        prem_vs = np.sqrt(vsh**2 + vsv**2)
-        vs_func = interpolate.interp1d(radius, prem_vs)
-        vel_s = vs_func(depths)
-
-        # vel_s = [3.50, 3.40, 3.50, 3.80, 4.20, 4.50, 4.70, 4.80, 4.75, 4.75]
-
-        model_params = np.concatenate((thickness, vel_s, [sigma_pd]))
+        # *** set vel_s to increase velocity with depth (genneral) ***
+        model_params = np.random.uniform(
+            self.param_bounds[:, 0], self.param_bounds[:, 1], self.n_layers
+        )
 
         return model_params
 
-    def get_birch_params(self):
-        radius = self.prem['radius[unit="m"]']
-        prem_density = self.prem['density[unit="kg/m^3"]']
-
-        # fit the curve
-        density_params = np.polyfit(radius, prem_density, deg=1)
-        # returns [-1.91018882e-03  1.46683536e+04]
-        return density_params
-
     def get_velocity_model(self, model_params):
+        """
+        not used for generalized inversion.
+        reshape model params to be inputed into forward model PhaseDispersion.
+        """
         # thickness, Vp, Vs, density
         # km, km/s, km/s, g/cm3
         thickness = self.get_thickness(model_params)
@@ -174,25 +136,30 @@ class Model:
 
     def forward_model(self, model_params):
         """
-        Get phase dispersion curve from shear velocities.
+        not general. modify the forward model for the type of inversion.
+        get phase dispersion curve for current shear velocities and layer thicknesses.
+
+        :param model_params: model params to use to get phase dispersion
         """
+        # get phase dispersion curve
         velocity_model = self.get_velocity_model(model_params)
         pd = PhaseDispersion(*velocity_model)
 
+        # try calculating phase_velocity from given params.
         try:
             pd_rayleigh = pd(self.periods, mode=0, wave="rayleigh")
             # ell = Ellipticity(*velocity_model.T)
             phase_velocity = pd_rayleigh.velocity
             return phase_velocity
         except (DispersionError, ZeroDivisionError) as e:
+            # *** errors: ***
             # failed to find root for fundamental mode
             # division by zero
-            # *** look into these errors and see what kind of parameters are causing them ***
             raise e
 
 
 class TrueModel(Model):
-    def __init__(self, sigma_pd_true, *args):
+    def __init__(self, *args):
         """
         Generate true model, which will be used to create simulated observed pd curves.
 
@@ -200,51 +167,33 @@ class TrueModel(Model):
         :param layer_bounds: [min, max] for layer thicknesses. (m)
         :param poisson_ratio:
         :param density_params: Birch params to simulate density profile.
-        :param sigma_pd: Uncertainty to add to simulated data.
         """
-        self.sigma_pd_true = sigma_pd_true
 
-        # *** gotta make sure generated model will work with forward model... ***
-        # initialize velocity model
-        # generates model params and data
-        super().__init__(*args)
+        super().__init__(*args)  # generates model params and data
 
     def generate_model_params(self):
         """
-        generating true velocity model from PREM.
-
-        :param layer_bounds: [min, max] for layer thicknesses. (m)
-        :param poisson_ratio:
-        :param density_params: Birch params to simulate density profile.
+        generating true velocity model.
         """
+
+        # *** currently the forward model errors a lot. i want to put better constraints on the params
+        #     so there aren't so many errors. i don't like this try-except, i want to validate the
+        #     params without calling the forward model. ***
+
+        # generating initial model params. generate params until the forward model runs without error.
         valid_params = False
-        # *** i don't want this try-except here. validate without calling forward_model ***
-        # *** should know if params are valid before inputing into forward_model ***
         while not valid_params:
             model_params = super().generate_model_params()
-            # get simulated true phase dispersion
             try:
+                # get the true data values for the true model
                 self.phase_vel_true = self.forward_model(model_params)
                 valid_params = True
             except (DispersionError, ZeroDivisionError):
                 continue
 
-        # *** test values:
-        model_params[self.n_layers : 2 * self.n_layers] = [
-            3.50,
-            3.40,
-            3.50,
-            3.80,
-            4.20,
-            4.50,
-            4.70,
-            4.80,
-            4.75,
-            4.75,
-        ]
-        sigma_pd = model_params[-1]  # ***
         # generate simulated observed data by adding noise to true values.
-        self.phase_vel_obs = self.phase_vel_true + sigma_pd * np.random.randn(
+        # *** validate the random distribution ***
+        self.phase_vel_obs = self.phase_vel_true + self.sigma_pd * np.random.randn(
             self.n_data
         )
         return model_params
@@ -254,22 +203,18 @@ class ChainModel(Model):
     def __init__(self, beta, data_obs, n_bins, *args):
         """
         :param beta: inverse temperature; larger values explore less of the parameter space,
-        but are more precise; between 0 and 1
-        :param data_obs:
-        :param n_keep:
+            but are more precise; between 0 and 1
+        :param data_obs: data observations- used to calculate likelihood of the model.
+        :param n_bins: number of bins for histogram ***
         """
         self.data_obs = data_obs
 
         super().__init__(*args)
 
         self.beta = beta
-        self.sigma_model = 1 / 20  # PC standard deviation
-        self.rot_mat = np.eye(self.n_params)  # rotation matrix
+        self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
 
-        # convergence params
         self.n_cov = 0  # initialize the dividing number for covariance
-
-        self.normalized_model = np.zeros(self.n_params)
 
         self.mean_model = np.zeros(self.n_params)
         self.mean_model_sum = np.zeros((self.n_params))
@@ -524,7 +469,6 @@ class ChainModel(Model):
         # *** validate this sigma_pd ***
         cov_data_inv = np.diag(self.n_data * [self.beta / self.sigma_pd**2])
 
-        #
         cov_cur = (
             np.matmul(np.matmul(np.transpose(Jac), cov_data_inv), Jac) + cov_prior_inv
         )
@@ -537,16 +481,16 @@ class ChainModel(Model):
 
         return sigma_model, rot_mat
 
-    def get_likelihood(self, params):
+    def get_likelihood(self, test_params):
         """
         :param params: test params to calculate likelihood with
         :param data_obs: the observed data, used to calculate residuals
         """
         # from the velocity model, calculate phase velocity and compare to true data.
-        n_params = len(params)  # *** get_likelihood is used in initialization
+        n_params = len(test_params)  # *** get_likelihood is used in initialization
         try:
-            phase_vel_cur = self.forward_model(params)
-            sigma_pd = self.get_sigma_pd(params)
+            phase_vel_cur = self.forward_model(test_params)
+            sigma_pd = self.get_sigma_pd(test_params)
             residuals = self.data_obs - phase_vel_cur
 
             logL = -(1 / 2) * n_params * np.log(sigma_pd) - np.sum(residuals**2) / (
@@ -571,40 +515,28 @@ class ChainModel(Model):
 
     def update_covariance_matrix(self, update_rot_mat):
         """
-        :param param_bounds: min, max, range of params; used to normalize model params.
+        :param update_rot_mat: whether or not to update the rotation matrix. this also updates sigma_model.
+            after the burn-in, we switch to calculating the rotation matrix from the covariance matrix.
         """
-
-        # *** covariance matrix is a running sum... collecting from burn in stage. cov mat linear estrimate during burn in, switch to running
-        # sum at end of burn in and then keep static? could keep updating and diminish the effect ***
-
-        # *** rename params ***
-
-        # can we get the covariance matrix for both chains at the same time?
-        # does the numpy cov function help?
-
-        # these variables could just be local..? does it matter?
-
-        # *** make sure there are no nans in output matrix ***
-
         # normalizing
-        self.normalized_model = (
+        normalized_model = (
             self.model_params - self.param_bounds[:, 0]
         ) / self.param_bounds[:, 2]
 
-        self.mean_model_sum += self.normalized_model  # calculating the sum of mean(m)
+        self.mean_model_sum += normalized_model  # calculating the sum of mean
         self.n_cov += 1  # number of covariance matrices in the sum
 
-        # *** this doesn't seem quite right... ****
-        self.mean_model = self.mean_model_sum / self.n_cov
+        # *** validate this ****
+        mean_model = self.mean_model_sum / self.n_cov
         self.cov_mat_sum = self.cov_mat_sum + np.outer(
-            np.transpose(self.normalized_model - self.mean_model),
-            self.normalized_model - self.mean_model,
+            np.transpose(normalized_model - mean_model),
+            normalized_model - mean_model,
         )
 
         # calculating covariance matrix from samples
         self.cov_mat = self.cov_mat_sum / self.n_cov
 
-        # *** simplify ***
+        # *** simplify? ***
         # dividing the covariance matrix by the auto-correlation of the params, and data
         for row in range(self.n_params):
             for col in range(self.n_params):
@@ -617,4 +549,3 @@ class ChainModel(Model):
                 self.cov_mat
             )  # rotate it to its Singular Value Decomposition
             self.sigma_model = np.sqrt(s)
-            print(self.sigma_model)

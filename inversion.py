@@ -21,14 +21,14 @@ TODO:
 class Inversion:
     def __init__(
         self,
-        n_chains,
         n_data,
-        n_layers,
         param_bounds,
-        poisson_ratio,
-        density_params,
         freqs,
         phase_vel_obs,
+        poisson_ratio=0.265,
+        density_params=[540.6, 360.1],  # *** check units
+        n_chains=2,
+        n_layers=10,
         n_bins=200,
         n_burn_in=10000,
         n_keep=2000,  # index for writing it down
@@ -42,7 +42,7 @@ class Inversion:
         :param phase_vel_obs: observed data/phase velocity
         :param n_bins: number of bins for the model histograms
         :param n_burn_in: number of steps to discard from the start of the run (to avoid bias towards the starting model)
-        :param n_keep: number of steps/iterations to save to file at a time
+        :param n_keep: number of steps/iterations to save to file at a time. determines total number of steps.
         :param n_rot: number of steps to do after nonlinear rotation starts
         """
         # parameters from scene
@@ -69,7 +69,6 @@ class Inversion:
         self.swap_acc = 0
         self.swap_prop = 0
 
-        # self.stored_results = {"params": [], "logL": [], "beta": []}
         self.stored_results = {
             "params": [],
             "logL": [],
@@ -77,16 +76,6 @@ class Inversion:
             "rot_mat": [],
             "sigma_pd": [],
         }
-        # self.stored_results = {"params": [], "logL": [], "beta": [], "acc": []}
-
-        n_params = param_bounds.shape[0]
-        self.ds_results = xr.Dataset(
-            coords={
-                "step": np.zeros(self.n_keep),
-                "param": np.arange(n_params),
-            },
-            # attrs={}
-        )
 
     def get_betas(self, dTlog=1.15):
         """
@@ -160,7 +149,7 @@ class Inversion:
                         and (n_steps > self.n_burn_in)
                         and n_steps != self.n_keep
                     )
-                    print(write_samples, update_rot_mat)
+                    end_burn_in = n_steps == self.n_keep - 1  # for test, save burn-in
                 else:
                     save_samples = update_cov_mat
                     # n_keep doesn't need to be same freq as updating rot_mat
@@ -168,6 +157,7 @@ class Inversion:
                         np.mod(n_steps + 1, self.n_keep)
                     ) == 0
                     update_rot_mat = write_samples and n_steps != self.n_keep
+                    end_burn_in = n_steps == self.n_burn_in - 1
 
                 # PARALLEL COMPUTING
                 delayed_results = []
@@ -189,12 +179,11 @@ class Inversion:
                 self.perform_tempering_swap()
 
                 # saving sample and write to file
-                self.check_convergence(n_steps, hist_conv, save_samples, out_dir)
+                hist_diff = self.check_convergence(n_steps, hist_conv, out_dir)
 
-                # *** just for testing
-                end_burn_in = n_steps == self.n_keep  # for test, save burn-in
-
-                self.store_samples(n_steps, write_samples, end_burn_in, out_dir)
+                self.store_samples(
+                    hist_diff, n_steps, self.n_keep, out_dir, write_samples, end_burn_in
+                )
 
     async def perform_step(self, chain_model, update_cov_mat, update_rot_mat):
         """
@@ -210,6 +199,7 @@ class Inversion:
         chain_model.perturb_params()
 
         # start saving cov_mat after burn-in
+        # *** can we get the covariance matrix for both chains at the same time? ***
         if update_cov_mat:
             chain_model.update_covariance_matrix(update_rot_mat)
 
@@ -249,25 +239,24 @@ class Inversion:
                     if beta_1 == 1 or beta_2 == 1:
                         self.swap_acc += 1
 
-                # swap_tot and swapacc are for calculating swap rate....
+                # *** swap_tot and swapacc are for calculating swap rate.... ***
                 # if beta is 1, this is the master chain?
                 if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
 
-    def check_convergence(self, n_steps, hist_conv, save_samples, out_dir):
+    def check_convergence(self, n_step, hist_conv, out_dir):
         """
         check if the model has converged.
 
-        :param n_steps: number of mcmc steps that have happened.
-        :hist_conv:
+        :param n_step: number of mcmc steps that have happened.
+        :hist_conv: value determining model convergence.
         :out_dir: path for where to save results.
         """
         # do at least n_rot steps after starting rotation before model can converge
-        enough_rotations = n_steps > (self.n_burn_in + self.n_rot)
+        enough_rotations = n_step > (self.n_burn_in + self.n_rot)
 
-        # SUBTRACTING 2 NORMALIZED HISTOGRAM
-        # find the max of abs of the difference between 2 models
-        # right now hard-coded for 2 chains
+        # *** validate. i think this is finding convergence for 2 chains. i want to generalize this. ***
+        # find the max of abs of the difference between 2 models, right now hard-coded for 2 chains
         hist_diff = (
             np.abs(
                 self.chains[0].model_hist / self.chains[0].model_hist.max()
@@ -275,35 +264,41 @@ class Inversion:
             )
         ).max()
 
-        if save_samples:
-            self.hist_diff_plot.append(hist_diff)
-
-        # *** should be collecting this info before hist is converged, right? ***
-        # *** use store_samples function for the saving
         if (hist_diff < hist_conv) & enough_rotations:
-            # collect results (collect last remaining results?)
-            # *** save hist_diff too ***
-            # keys = ["logL", "m", "d"]
-            # keys = ["logL", "m", "d", "acc"]
-            # logLkeep2, mkeep2, dkeep2, acc, hist_d_plot, covariance matrix
-            # for key in keys():
-            #    df_dict = {}
-            #    for ind in range(self.n_chains):
-            #        df_dict[key] = self.chains[ind].saved_results[key]
-            #    df = pd.DataFrame(df_dict)
-            #    df.to_csv(
-            #        out_dir + key + ".csv",
-            #    )
+            # store the samples up to the convergence.
+            n_samples = (n_step - self.n_burn_in) % self.n_keep
+            self.store_samples(
+                hist_diff,
+                n_step,
+                n_samples,
+                out_dir,
+                write_samples=True,
+                create_file=False,
+            )
 
-            # TERMINATE!
+            # model has converged.
             sys.exit("Converged, terminate.")
 
-    def store_samples(self, n_steps, write_samples, create_file, out_dir):
+        return hist_diff
+
+    def store_samples(
+        self, hist_diff, n_step, n_samples, out_dir, write_samples, create_file
+    ):
         """
-        Write out to csv in chunks of size n_keep.
+        write out to .zarr in chunks of size n_keep.
+
+        :param hist_diff: used for determining convergence.
+        :param n_step: current step number in the random walk.
+        :param n_samples: number of samples being saved.
+        :param write_samples: whether or not to write samples to file. (write every n_keep steps)
+        :param create_file: whether or not this is the first save to file, and if the file needs to be created.
+        :param out_dir: the output directory where to save results.
         """
-        # saving the chain model with beta of 1
         for chain in self.chains:
+            # *** how to save model_hist? ***
+            chain.update_model_hist()
+            # saving the chain model with beta of 1
+            # *** also there are multiple chains like that. which one do i save? ***
             if chain.beta == 1:
                 # maybe move this to model class
                 self.stored_results["params"].append(chain.model_params)
@@ -311,33 +306,45 @@ class Inversion:
                 self.stored_results["beta"].append(chain.beta)
                 self.stored_results["rot_mat"].append(chain.rot_mat)
                 self.stored_results["sigma_pd"].append(chain.sigma_pd)
+                self.stored_results["hist_diff"].append(hist_diff)
                 # self.stored_results["acc"].append(chain.acc)
 
         if write_samples:
-            # if it is the first time saving, write to file with mode="w"
-            # otherwise append with mode="a"
-            self.ds_results.assign_coords(
-                {"step": np.arange(n_steps - self.n_keep, n_steps)}
+            # *** i don't like the way this is getting n_params. ***
+            n_params = len(self.stored_results["params"][0])
+            # create dataset to store results
+            ds_results = xr.Dataset(
+                coords={
+                    "step": np.zeros(n_samples),
+                    "param": np.arange(n_params),
+                },
             )
+            ds_results["step"] = np.arange(n_step + 1 - n_samples, n_step + 1)
 
-            self.ds_results["params"] = (
+            # add model params, logL, sigma_pd, rot_mat to the results dataset
+            ds_results["params"] = (
                 ["step", "param"],
                 self.stored_results["params"],
             )
-            self.ds_results["logL"] = (["step"], self.stored_results["logL"])
-            self.ds_results["sigma_pd"] = (["step"], self.stored_results["sigma_pd"])
-            self.ds_results["rot_mat"] = (
+            ds_results["logL"] = (["step"], self.stored_results["logL"])
+            ds_results["sigma_pd"] = (["step"], self.stored_results["sigma_pd"])
+            ds_results["rot_mat"] = (
                 ["step", "param", "param"],
                 self.stored_results["rot_mat"],
             )
 
+            # if the output folder doesn't exist, create it.
             path_dir = os.path.dirname(out_dir)
             if not os.path.isdir(path_dir):
                 os.mkdir(path_dir)
 
-            self.ds_results.to_zarr(out_dir, mode="w" if create_file else "a")
+            # if this is the first iteration, create a file to save ds_results. otherwise append the results.
+            if create_file:
+                ds_results.to_zarr(out_dir)
+            else:
+                ds_results.to_zarr(out_dir, append_dim="step")
 
-            # clear stored results after saving...
+            # clear stored results after saving.
             self.stored_results = {
                 "params": [],
                 "logL": [],
