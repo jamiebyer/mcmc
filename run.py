@@ -7,11 +7,7 @@ import asyncio
 """
 TODO:
 - add environment
-- readme
-- figures folder
-- add tests
 - fix linters
-- docstrings and references to papers
 - alphabetize or organize function order
 - cauchy proposal...
 - add logging
@@ -25,25 +21,23 @@ def setup_scene(
     poisson_ratio=0.265,
     density_params=[540.6, 360.1],
     n_layers=10,
-    sigma_pd_true=0.0001,
     layer_bounds=[5e-3, 15e-3],
     vel_s_bounds=[2, 6],
     sigma_pd_bounds=[0, 1],
-    freq_range=[2.5, 1.5]
+    freq_range=[2.5, 1.5],
 ):
     """
     Define parameter bounds. Create simulated true model and observed data.
 
-    :param poisson_ratio:
-    :param density_params:
-    :param n_layers: Number of layers in model.
     :param n_data: Number of simulated observed data.
-    :param sigma_pd_true:
+    :param poisson_ratio: poisson's ratio to use to calculate vel_p from vel_s.
+    :param density_params: birch params to use to estimate density depth profile.
+    :param n_layers: Number of layers in model.
 
     # Bounds of search (min, max)
     :param layer_bounds: (km)
     :param vel_s_bounds: (km/s)
-    :param sigma_pd_bounds: 
+    :param sigma_pd_bounds:
     :param freq_range: range of frequencies for simulated data. exponent values used to make a range of frequencies. (Hz)
     """
 
@@ -65,7 +59,7 @@ def setup_scene(
     # *** how would this data be collected? what is the spacing between frequencies? ***
     # *** frequencies will be input from the data. total depth of the model should be similar to data depth ***
     freqs = np.logspace(freq_range[0], freq_range[1], n_data)  # (Hz)
-    
+
     true_model = TrueModel(
         n_layers,
         n_data,
@@ -82,13 +76,14 @@ def run(
     true_model_kwargs,
     inversion_kwargs,
     n_data=10,
+    max_perturbations=10,
     hist_conv=0.05,
     out_dir="/out/inversion_results",
 ):
     """
     Run inversion.
 
-    :param true_model_kwargs: (poisson_ratio, density_params, n_layers, sigma_pd_true, layer_bounds, vel_s_bounds, sigma_pd_bounds)
+    :param true_model_kwargs: (poisson_ratio, density_params, n_layers, layer_bounds, vel_s_bounds, sigma_pd_bounds)
         changeable variables that affect the true model (simulated data)
     :param inversion_kwargs: (poisson_ratio, density_params, n_chains, n_layers, n_bins, n_burn, n_keep, n_rot)
         changeable variables that affect the inversion.
@@ -103,12 +98,16 @@ def run(
     # plot_results(true_model)
     # run inversion
     inversion = Inversion(
-        n_data, param_bounds, true_model.freqs, true_model.phase_vel_obs, inversion_kwargs
+        n_data,
+        param_bounds,
+        true_model.freqs,
+        true_model.phase_vel_obs,
+        inversion_kwargs,
     )
 
     # *** should any of those params just be in random walk?
     asyncio.get_event_loop().run_until_complete(
-        inversion.random_walk(hist_conv, out_dir)
+        inversion.random_walk(max_perturbations, hist_conv, out_dir)
     )
 
 
@@ -125,17 +124,19 @@ if __name__ == "__main__":
             "density_params": [540.6, 360.1],  # *** check units ***
             "n_data": 10,
             "n_layers": 10,
-            "layer_bounds": [5e-3, 15e-3]  # km
-            "vel_s_bounds": [2, 6]  # km/s
-            "sigma_pd_bounds": [0, 1]
+            "layer_bounds": [5e-3, 15e-3],  # km
+            "vel_s_bounds": [2, 6],  # km/s
+            "sigma_pd_bounds": [0, 1],
         },
     )
     inversion_kwargs = (
         {
             "poisson_ratio": 0.265,
             "density_params": [540.6, 360.1],  # *** check units ***
-            "n_chains": 2,
             "n_layers": 10,
+            "n_chains": 2,
+            "beta_spacing_factor": 1.15,
+            "model_variance": 12,
             "n_bins": 200,
             "n_burn": 10000,
             "n_keep": 2000,
@@ -147,6 +148,7 @@ if __name__ == "__main__":
         true_model_kwargs,
         inversion_kwargs,
         n_data=10,
+        max_perturbations=10,
         hist_conv=0.05,
-        out_dir="./out/inversion_results_" + str(time.time())
+        out_dir="./out/inversion_results_" + str(time.time()),
     )

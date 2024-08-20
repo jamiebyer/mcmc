@@ -1,19 +1,12 @@
 import numpy as np
-import pandas as pd
 import sys
-import dask
 from model import ChainModel
 from dask.distributed import Client
-import dask.dataframe as dd
 import os
 import xarray as xr
 
 """
 TODO:
-- add back NCHAINTHIN (randomized?)
-- order of params..?
-- rotation
-- save acceptance rate
 - change beta steps vals based on acceptance rate
 """
 
@@ -27,19 +20,26 @@ class Inversion:
         phase_vel_obs,
         poisson_ratio=0.265,
         density_params=[540.6, 360.1],  # *** check units
-        n_chains=2,
         n_layers=10,
+        n_chains=2,
+        beta_spacing_factor=1.15,
+        model_variance=12,
         n_bins=200,
         n_burn_in=10000,
         n_keep=2000,  # index for writing it down
         n_rot=40000,  # Do at least n_rot steps after nonlinear rotation starts
     ):
         """
-        :param freqs: frequencies at which data is measured
-        :param n_layers: number of layers in the model
+        :param n_data: number of data observed.
         :param param_bounds: min, max bounds for each model param
-        :param starting_models: starting model for each chain
-        :param phase_vel_obs: observed data/phase velocity
+        :param freqs: frequencies at which data is measured
+        :param phase_vel_obs: observed data from true model
+        :param poisson_ratio:
+        :param density_params:
+        :param n_layers: number of layers in model.
+        :param n_chains: number of chains
+        :param beta_spacing_factor:
+        :param model_variance:
         :param n_bins: number of bins for the model histograms
         :param n_burn_in: number of steps to discard from the start of the run (to avoid bias towards the starting model)
         :param n_keep: number of steps/iterations to save to file at a time. determines total number of steps.
@@ -48,7 +48,7 @@ class Inversion:
         # parameters from scene
         self.freqs = freqs
         self.n_layers = n_layers
-        self.phase_vel_obs = phase_vel_obs  # observed data
+        self.phase_vel_obs = phase_vel_obs
 
         # parameters related to number of steps taken in random walk
         self.n_burn_in = n_burn_in
@@ -56,16 +56,20 @@ class Inversion:
         self.n_rot = n_rot
         self.n_mcmc = 100000 * n_keep  # number of steps for the random walk
 
-        # define chains here
+        # initialize chains, generate starting params.
         self.n_chains = n_chains
         self.initialize_chains(
-            n_data, n_bins, param_bounds, poisson_ratio, density_params
+            n_data,
+            n_bins,
+            param_bounds,
+            poisson_ratio,
+            density_params,
+            model_variance,
+            beta_spacing_factor,
         )
 
         # parameters for saving data
         self.n_bins = n_bins
-        self.hist_diff_plot = []
-
         self.swap_acc = 0
         self.swap_prop = 0
 
@@ -74,42 +78,56 @@ class Inversion:
             "logL": [],
             "beta": [],
             "rot_mat": [],
-            "sigma_pd": [],
+            "sigma_model": [],
+            "acc_rate": [],
         }
 
-    def get_betas(self, dTlog=1.15):
+    def get_betas(self, beta_spacing_factor):
         """
-        setting values for beta to be used. the first quarter of the chains have beta=0
+        getting beta values to use for each chain.
 
-        :param dTlog: determines the spacing between values of beta. smaller spacing will
+        :param beta_spacing_factor: determines the spacing between values of beta. smaller spacing will
         have higher acceptance rates. larger spacing will explore more of the space. we want to tune
         the spacing so our acceptance rate is 30-50%. dTlog should be larger than 1.
-
-        :return beta: inverse temperature; beta values to use for each chain
         """
-        # *** maybe this function should be replaced with a property later***
-        # Parallel tempering schedule
+        # *** later could tune beta_spacing_factor as the inversion runs, looking at the acceptance rate every ~10 000 steps ***
+
+        # getting beta values to use for parallel tempering
         n_temps = self.n_chains
-        # *** later could tune dTlog as the inversion runs, looking at the acceptance rate every ~10 000 steps ***
+
         # 1/4 to 1/2 of the chains should be beta=1.
         n_temps_frac = int(np.ceil(n_temps / 4))
         betas = np.zeros(n_temps, dtype=float)
-
         inds = np.arange(n_temps_frac, n_temps)
-        betas[inds] = 1.0 / dTlog**inds
-        # T = 1.0 / beta
-        betas = [0.5, 1]  # *** hard coded beta for now ***
+        betas[inds] = 1.0 / beta_spacing_factor**inds
+
         return betas
 
     def initialize_chains(
-        self, n_data, n_bins, param_bounds, poisson_ratio, density_params
+        self,
+        n_data,
+        n_bins,
+        param_bounds,
+        poisson_ratio,
+        density_params,
+        model_variance,
+        beta_spacing_factor,
     ):
+        """
+        initialize each of the chains, setting starting parameters, beta values, initial rotation params
+
+        :param n_data: number of observed data
+        :param n_bins: number of bins for histogram of results
+        :param param_bounds: bounds for the model params (min, max, range)
+        :param poisson_ratio: value for poisson's ratio to pass to the chain model
+        :param density_params: birch's parameters to pass to the chain model
+        :param model_variance:
+        :param beta_spacing_factor"
+        """
         # generate the starting models
-        betas = self.get_betas()
+        betas = self.get_betas(beta_spacing_factor)  # get values of beta
         chains = []
         for ind in range(self.n_chains):
-            # *** generate params within bounds, poisson_ratio, and density_params ? ***
-            # *** starting_model params should be separate from true model params ***
             model = ChainModel(
                 betas[ind],
                 self.phase_vel_obs,
@@ -121,26 +139,30 @@ class Inversion:
                 poisson_ratio,
                 density_params,
             )
-            # *** validate sigma_pd ***
-            # setting initial values for u, pcsd...
-            # *** lin rot is updated every iteration in burn in? ***
-            # *** choosing variance (trial and error...?) ***
-            model.lin_rot(variance=12)
+            # get rot_mat and sigma_model for the starting model
+            model.sigma_model, model.rot_mat = model.lin_rot(model_variance)
 
             chains.append(model)
+
         self.chains = chains
 
-    async def random_walk(self, hist_conv, out_dir):
+    async def random_walk(
+        self, max_perturbations, hist_conv, out_dir, scale_factor=1.3, save_burn_in=True
+    ):
         """
-        :param hist_conv:
+        perform the main loop, for n_mcmc iterations.
+
+        :param max_perturbations:
+        :param hist_conv: value to determine convergence.
+        :param out_dir: directory where to save results.
+        :param save_burn_in:
         """
         async with Client(asynchronous=True) as client:
             for n_steps in range(self.n_mcmc):
                 print("\n", n_steps)
-                save_burn_in = True
+
                 update_cov_mat = n_steps >= self.n_burn_in
                 if save_burn_in:
-                    save_samples = True
                     write_samples = (n_steps >= self.n_keep - 1) and (
                         (np.mod(n_steps + 1, self.n_keep)) == 0
                     )
@@ -149,9 +171,8 @@ class Inversion:
                         and (n_steps > self.n_burn_in)
                         and n_steps != self.n_keep
                     )
-                    end_burn_in = n_steps == self.n_keep - 1  # for test, save burn-in
+                    end_burn_in = n_steps == self.n_keep - 1
                 else:
-                    save_samples = update_cov_mat
                     # n_keep doesn't need to be same freq as updating rot_mat
                     write_samples = (n_steps >= self.n_burn_in - 1) and (
                         np.mod(n_steps + 1, self.n_keep)
@@ -159,53 +180,58 @@ class Inversion:
                     update_rot_mat = write_samples and n_steps != self.n_keep
                     end_burn_in = n_steps == self.n_burn_in - 1
 
-                # PARALLEL COMPUTING
+                # parallel computing
                 delayed_results = []
                 for ind in range(self.n_chains):
                     chain_model = self.chains[ind]
 
                     updated_model = client.submit(
-                        self.perform_step, chain_model, update_cov_mat, update_rot_mat
+                        self.perform_step,
+                        chain_model,
+                        update_cov_mat,
+                        update_rot_mat,
+                        max_perturbations,
+                        scale_factor,
                     )
                     delayed_results.append(updated_model)
 
                 # synchronizing the separate chains
                 self.chains = await client.gather(delayed_results)
 
-                # prop[source_1 - 1, :] = prop_acc[0, :]
-                # acc[source_1 - 1, :] = prop_acc[1, :]
-
-                # Tempering exchange move
+                # tempering exchange move
                 self.perform_tempering_swap()
 
                 # saving sample and write to file
                 hist_diff = self.check_convergence(n_steps, hist_conv, out_dir)
-
                 self.store_samples(
                     hist_diff, n_steps, self.n_keep, out_dir, write_samples, end_burn_in
                 )
 
-    async def perform_step(self, chain_model, update_cov_mat, update_rot_mat):
+    async def perform_step(
+        self,
+        chain_model,
+        update_cov_mat,
+        update_rot_mat,
+        max_perturbations,
+        scale_factor,
+    ):
         """
         update one chain model.
         perturb each param on the chain model and accept each new model with a likelihood.
 
         :param chain_model:
-
-        :return: updated chain model
+        :param update_cov_mat:
+        :param update_rot_mat:
         """
-        # *** might move perturb params to inversion class. clean this up ***
-        # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
-        chain_model.perturb_params()
+        # *** what kind of random distribution should this be, and should there be a lower bound...? ***
+        n_perturbations = np.random.uniform(max_perturbations)
+        for _ in n_perturbations:
+            # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
+            chain_model.perturb_params(scale_factor)
 
-        # start saving cov_mat after burn-in
-        # *** can we get the covariance matrix for both chains at the same time? ***
-        if update_cov_mat:
-            chain_model.update_covariance_matrix(update_rot_mat)
-
-        # only update the histogram if it's being saved
-        # *** need to add hist to saved results? ***
-        chain_model.update_model_hist()
+            # start saving cov_mat after burn-in
+            if update_cov_mat:
+                chain_model.update_covariance_matrix(update_rot_mat)
 
         return chain_model
 
@@ -307,7 +333,9 @@ class Inversion:
                 self.stored_results["rot_mat"].append(chain.rot_mat)
                 self.stored_results["sigma_pd"].append(chain.sigma_pd)
                 self.stored_results["hist_diff"].append(hist_diff)
-                # self.stored_results["acc"].append(chain.acc)
+                self.stored_results["acc_rate"].append(
+                    chain.swap_acc / (chain.swap_acc + chain.swap_prop)
+                )
 
         if write_samples:
             # *** i don't like the way this is getting n_params. ***
@@ -319,18 +347,30 @@ class Inversion:
                     "param": np.arange(n_params),
                 },
             )
-            ds_results["step"] = np.arange(n_step + 1 - n_samples, n_step + 1)
 
             # add model params, logL, sigma_pd, rot_mat to the results dataset
-            ds_results["params"] = (
-                ["step", "param"],
-                self.stored_results["params"],
-            )
-            ds_results["logL"] = (["step"], self.stored_results["logL"])
-            ds_results["sigma_pd"] = (["step"], self.stored_results["sigma_pd"])
-            ds_results["rot_mat"] = (
-                ["step", "param", "param"],
-                self.stored_results["rot_mat"],
+            ds_results.update(
+                {
+                    "step": np.arange(n_step + 1 - n_samples, n_step + 1),
+                    "params": (
+                        ["step", "param"],
+                        self.stored_results["params"],
+                    ),
+                    "logL": (["step"], self.stored_results["logL"]),
+                    "sigma_model": (["step"], self.stored_results["sigma_model"]),
+                    "rot_mat": (
+                        ["step", "param", "param"],
+                        self.stored_results["rot_mat"],
+                    ),
+                    "hist_diff": (
+                        ["step", "param"],
+                        self.stored_results["hist_diff"],
+                    ),
+                    "acc_rate": (
+                        ["step", "param"],
+                        self.stored_results["acc_rate"],
+                    ),
+                }
             )
 
             # if the output folder doesn't exist, create it.
@@ -351,4 +391,6 @@ class Inversion:
                 "beta": [],
                 "rot_mat": [],
                 "sigma_pd": [],
+                "hist_diff": [],
+                "acc_rate": [],
             }

@@ -1,11 +1,23 @@
 import xarray as xr
 import numpy as np
 
-"""
-TODO:
-- save values of running to the end of burn-in, use those to test rotation
-- check generating models, what parameters are valid, in bounds
-"""
+
+def test_lin_rot():
+    pass
+
+
+def test_parallel_computing():
+    pass
+
+
+def test_get_betas():
+    betas = [0.5, 1]  # *** hard coded beta for now ***
+    pass
+
+
+def test_generating_model_params():
+    # check generating models, what parameters are valid, in bounds
+    pass
 
 
 def test_run():
@@ -25,4 +37,5 @@ def test_run():
 
 
 def test_rotation():
+    # save values of running to the end of burn-in, use those to test rotation
     pass
