@@ -8,10 +8,10 @@ import asyncio
 TODO:
 - add environment
 - fix linters
-- alphabetize or organize function order
-- cauchy proposal...
+- organize function order
+- check random distributions: cauchy proposal...
 - add logging
-- optimization
+- optimization / proctoring 
 - clear terminal errors
 """
 
