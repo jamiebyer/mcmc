@@ -3,91 +3,199 @@ from disba import PhaseDispersion
 from disba._exception import DispersionError
 import pandas as pd
 from scipy import interpolate
+import matplotlib.pyplot as plt
+from fk_processing.run_geopsy import get_dispersion_curve
 
 np.complex_ = np.complex64
 
-"""
-TODO: 
-- change how the true model and starting models are generated.
-- fix: failed to find root for fundamental mode
-- fix: division by zero
-- fix: invalid value in log
-- generalize layer_bounds
-"""
+
+class Data:
+    def __init__(self, periods, data_obs, sigma_data):
+        self.periods = periods
+        self.data_obs = data_obs
+        self.n_data = len(self.data_obs)
+        self.sigma_data = sigma_data
+
+        if len(sigma_data) == self.n_data:
+            self.data_cov = np.diag(sigma_data**2)
+        elif len(sigma_data) == 1:
+            self.data_cov = np.eye(self.n_data) * sigma_data
+
+
+class FieldData(Data):
+    def __init__(self, path):
+        periods, phase_vels, stds = self.read_observed_data(path)
+
+        super().__init__(periods, phase_vels, stds)
+
+    def read_observed_data(self, path):
+        """
+        read dispersion curve
+        """
+        freqs, phase_vels, stds = get_dispersion_curve(path)
+        periods = 1 / freqs
+        # sort
+
+        return periods, phase_vels, stds
+
+
+class SyntheticData(Data):
+    def __init__(self, periods, sigma_data, thickness, vel_s, vel_p, density):
+        velocity_model = np.array([thickness + [0], vel_p, vel_s, density])
+        data_true, data_obs = self.generate_observed_data(
+            periods, sigma_data, velocity_model
+        )
+        self.data_true = data_true
+        super().__init__(periods, data_obs, sigma_data)
+
+    def generate_observed_data(self, periods, sigma_data, velocity_model):
+        pd = PhaseDispersion(*velocity_model)
+        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+
+        data_true = pd_rayleigh.velocity
+        data_obs = data_true + sigma_data * np.random.randn(len(periods))
+        return data_true, data_obs
+
+
+class GeneratedData(Data):
+
+    def __init__(self, periods, sigma_data, bounds, n_layers):
+        # velocity_model = np.array([thickness + [0], vel_p, vel_s, density])
+        data_true, data_obs = self.generate_observed_data(
+            periods, sigma_data, bounds, n_layers
+        )
+        self.data_true = data_true
+        super().__init__(periods, data_obs, sigma_data)
+
+    def generate_observed_data(self, periods, sigma_data, bounds, n_layers):
+        valid_params = False
+        while not valid_params:
+            thickness = np.random.uniform(
+                bounds["thickness"][0],
+                bounds["thickness"][1],
+                n_layers - 1,
+            )
+            vel_s = np.random.uniform(bounds["vel_s"][0], bounds["vel_s"][1], n_layers)
+            vel_p = np.random.uniform(bounds["vel_p"][0], bounds["vel_p"][1], n_layers)
+            density = np.random.uniform(
+                bounds["density"][0], bounds["density"][1], n_layers
+            )
+            velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
+
+            try:
+                pd = PhaseDispersion(*velocity_model)
+                pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+                valid_params = True
+            except (DispersionError, ZeroDivisionError) as e:
+                pass
+
+        data_true = pd_rayleigh.velocity
+        data_obs = data_true + sigma_data * np.random.randn(len(periods))
+        return data_true, data_obs
 
 
 class Model:
+
     def __init__(
         self,
         n_layers: int,
-        n_data: int,
-        periods: np.ndarray,
-        param_bounds,
         poisson_ratio: float,
-        density_params: list,
+        sigma_model,
+        beta,
+        n_bins,
     ):
         """
-        :param n_layers: number of layers in the model.
-        :param n_data: number of data collected
-        :param freqs: frequencies at which data was collected.
-        :param sigma_model: uncertainty in data
-        :param param_bounds: array of (min, max, range) for each parameter. same length as n_params
-        :param poisson_ratio: value for poisson's ratio used to approximate vel_p from vel_s
-        :param density_params: birch params used to estimate the density profile of the model
+        :param beta: inverse temperature; larger values explore less of the parameter space,
+            but are more precise; between 0 and 1
+        :param n_bins: number of bins for histogram
         """
-        self.n_layers = n_layers
-        self.n_data = n_data
-        self.periods = periods
 
-        self.param_bounds = param_bounds
+        self.n_layers = n_layers
+
+        # used for computing model params
         self.poisson_ratio = poisson_ratio
-        self.density_params = density_params
+        self.sigma_model = sigma_model
 
         # assemble model params
-        self.model_params = self.generate_model_params()
-        self.n_params = len(self.model_params)
+        self.n_params = 2 * n_layers - 1
+        self._thickness = None
+        self._vel_s = None
+        self._vel_p = None
+        self._density = None
+
+        self.logL = None
+        self.data_pred = None
+
+        self.beta = beta
+
+        # variables for storing and computing covariance matrix after burn-in
+        self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
+        self.n_cov = 0  # initialize the dividing number for covariance
+        self.mean_model = np.zeros(self.n_params)
+        self.mean_model_sum = np.zeros((self.n_params))
+
+        # initialize covariance matrix
+        self.cov_mat = np.zeros((self.n_params, self.n_params))
+        self.cov_mat_sum = np.zeros((self.n_params, self.n_params))
+
+        # acceptance ratio for each parameter
+        self.swap_acc = 0
+        self.swap_prop = 0
+        self.swap_err = 0
+
+        # initialize histogram of model parameters
+        self.n_bins = n_bins
+        self.model_hist = np.zeros((self.n_params, n_bins + 1))
 
     @property
     def layer_bounds(self):
         return self.param_bounds[0]
 
     @property
-    def sigma_model_bounds(self):
-        return self.param_bounds[-1]
-
-    @property
     def thickness(self):
-        return self.model_params[: self.n_layers]
+        # return self.model_params[: (self.n_layers - 1)]
+        return self._thickness
+
+    @thickness.setter
+    def thickness(self, thickness):
+        # validate bounds
+        # self.model_params[: (self.n_layers - 1)] = thickness
+        self._thickness = thickness
 
     @property
     def vel_s(self):
-        return self.model_params[self.n_layers : 2 * self.n_layers]
+        # return self.model_params[self.n_layers : 2 * self.n_layers]
+        return self._vel_s
+
+    @vel_s.setter
+    def vel_s(self, vel_s):
+        # validate bounds
+        # self.model_params[self.n_layers : 2 * self.n_layers] = vel_s
+        self._vel_s = vel_s
+
+        # update vel_p and density
+        self.vel_p = self.get_vel_p(self._vel_s)
+        self.density = self.get_density(self.vel_p)
 
     @property
     def vel_p(self):
-        vp_vs = np.sqrt((2 - 2 * self.poisson_ratio) / (1 - 2 * self.poisson_ratio))
-        vel_p = self.vel_s * vp_vs
-        return vel_p
+        # check bounds
+        return self._vel_p
+
+    @vel_p.setter
+    def vel_p(self, vel_p):
+        # check bounds
+        self._vel_p = vel_p
 
     @property
     def density(self):
-        # *** don't recompute vel_p ***
-        density = (self.vel_p - self.density_params[0]) / self.density_params[1]
-        return density
+        # check bounds
+        return self._density
 
-    @property
-    def sigma_model(self):
-        return self.model_params[-1]
-
-    @sigma_model.setter
-    def sigma_model(self, sigma_model):
-        self.model_params[-1] = sigma_model
-
-    def get_thickness(self, model_params):
-        return model_params[: self.n_layers]
-
-    def get_vel_s(self, model_params):
-        return model_params[self.n_layers : 2 * self.n_layers]
+    @density.setter
+    def density(self, density):
+        # check bounds
+        self._density = density
 
     def get_vel_p(self, vel_s):
         vp_vs = np.sqrt((2 - 2 * self.poisson_ratio) / (1 - 2 * self.poisson_ratio))
@@ -95,58 +203,73 @@ class Model:
         return vel_p
 
     def get_density(self, vel_p):
-        density = (vel_p - self.density_params[0]) / self.density_params[1]
+        density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
         return density
 
     @staticmethod
-    def get_sigma_model(model_params):
-        return model_params[-1]
-
-    def generate_model_params(self):
-        """
-        generating initial params for new model.
-        """
-        # can add other information to make a better initial model.
-        # make sure generating true model is different than method for generating starting models for chains
-        # could add a starting estimate for sigma_model
-
-        # *** set vel_s to increase velocity with depth (genneral) ***
-        model_params = np.random.uniform(
-            self.param_bounds[:, 0], self.param_bounds[:, 1], self.param_bounds.shape[0]
+    def assemble_param_bounds(bounds, n_layers):
+        # reshape bounds to be the same shape as params
+        param_bounds = np.concatenate(
+            (
+                [bounds["thickness"]] * (n_layers - 1),
+                [bounds["vel_s"]] * n_layers,
+                [bounds["vel_p"]] * n_layers,
+                [bounds["density"]] * n_layers,
+                # [bounds["sigma_model"]],
+            ),
+            axis=0,
         )
 
-        return model_params
+        # add the range of the bounds to param_bounds as a third column (min, max, range)
+        range = param_bounds[:, 1] - param_bounds[:, 0]
+        param_bounds = np.column_stack((param_bounds, range))
 
-    def get_velocity_model(self, model_params):
-        """
-        not used for generalized inversion.
-        reshape model params to be inputed into forward model PhaseDispersion.
-        """
-        # thickness, Vp, Vs, density
-        # km, km/s, km/s, g/cm3
-        thickness = self.get_thickness(model_params)
-        vel_s = self.get_vel_s(model_params)
+        return param_bounds
+
+    def get_velocity_model(self, param_bounds, thickness, vel_s):
         vel_p = self.get_vel_p(vel_s)
         density = self.get_density(vel_p)
+        velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
 
-        return [thickness, vel_p, vel_s, density]
+        # validate bounds and physics...
+        valid_thickness = (thickness >= param_bounds["thickness"][0]) & (
+            thickness <= param_bounds["thickness"][1]
+        )
+        valid_vel_s = (vel_s >= param_bounds["vel_s"][0]) & (
+            vel_s <= param_bounds["vel_s"][1]
+        )
+        valid_vel_p = (vel_p >= param_bounds["vel_p"][0]) & (
+            vel_p <= param_bounds["vel_p"][1]
+        )
+        valid_density = (density >= param_bounds["density"][0]) & (
+            density <= param_bounds["density"][1]
+        )
 
-    def forward_model(self, model_params):
+        valid_params = np.all(
+            valid_thickness & valid_vel_s & valid_vel_p & valid_density
+        )
+
+        return velocity_model, valid_params
+
+    def forward_model(self, periods, velocity_model):
         """
-        not general. modify the forward model for the type of inversion.
         get phase dispersion curve for current shear velocities and layer thicknesses.
 
         :param model_params: model params to use to get phase dispersion
+        *** generalize later***
         """
+        # *** keep track of errors in forward model
         # get phase dispersion curve
-        velocity_model = self.get_velocity_model(model_params)
+        # thickness, Vp, Vs, density
+        # km, km/s, km/s, g/cm3
         pd = PhaseDispersion(*velocity_model)
 
         # try calculating phase_velocity from given params.
         try:
-            pd_rayleigh = pd(self.periods, mode=0, wave="rayleigh")
+            pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
             # ell = Ellipticity(*velocity_model.T)
             phase_velocity = pd_rayleigh.velocity
+
             return phase_velocity
         except (DispersionError, ZeroDivisionError) as e:
             # *** errors: ***
@@ -154,356 +277,341 @@ class Model:
             # division by zero
             raise e
 
-
-class TrueModel(Model):
-    def __init__(self, *args):
+    def generate_model_params(self, param_bounds):
         """
-        Generate true model, which will be used to create simulated observed pd curves.
-
-        :param n_data: Number of observed data to simulate.
-        :param layer_bounds: [min, max] for layer thicknesses. (m)
-        :param poisson_ratio:
-        :param density_params: Birch params to simulate density profile.
+        generating initial params for new model.
         """
-
-        super().__init__(*args)  # generates model params and data
-
-    def generate_model_params(self):
-        """
-        generating true velocity model.
-        """
-
-        # *** currently the forward model errors a lot. i want to put better constraints on the params
-        #     so there aren't so many errors. i don't like this try-except, i want to validate the
-        #     params without calling the forward model. ***
-
-        # generating initial model params. generate params until the forward model runs without error.
-        valid_params = False
-        while not valid_params:
-            model_params = super().generate_model_params()
-            try:
-                # get the true data values for the true model
-                self.phase_vel_true = self.forward_model(model_params)
-                valid_params = True
-            except (DispersionError, ZeroDivisionError):
-                continue
-
-        # generate simulated observed data by adding noise to true values.
-        # *** validate the random distribution ***
-        self.phase_vel_obs = self.phase_vel_true + self.sigma_model * np.random.randn(
-            self.n_data
+        # only for thickness and shear velocity, compute for vel_p and density
+        model_params = np.random.uniform(
+            param_bounds[:, 0], param_bounds[:, 1], self.n_params
         )
-        return model_params
-
-
-class ChainModel(Model):
-    def __init__(self, beta, data_obs, n_bins, *args):
-        """
-        :param beta: inverse temperature; larger values explore less of the parameter space,
-            but are more precise; between 0 and 1
-        :param data_obs: data observations- used to calculate likelihood of the model.
-        :param n_bins: number of bins for histogram ***
-        """
-        self.data_obs = data_obs
-
-        super().__init__(*args)
-
-        self.beta = beta
-        self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
-
-        self.n_cov = 0  # initialize the dividing number for covariance
-
-        self.mean_model = np.zeros(self.n_params)
-        self.mean_model_sum = np.zeros((self.n_params))
-
-        self.cov_mat = np.zeros(
-            (self.n_params, self.n_params)
-        )  # initialize covariance matrix
-        self.cov_mat_sum = np.zeros(
-            (self.n_params, self.n_params)
-        )  # initialize covariance matrix sum
-
-        # initialize histogram of model parameters
-        self.model_hist = np.zeros((n_bins + 1, self.n_params))
-        self.bins = np.zeros((n_bins + 1, self.n_params))
-        for ind in range(self.n_params - 1):
-            # getting bins for the param,
-            edge = np.linspace(
-                self.param_bounds[ind, 0], self.param_bounds[ind, 1], n_bins + 1
-            )
-            self.bins[:, ind] = edge
-
-        # acceptance ratio for each parameter
-        # self.acc_ratio = np.zeros(self.n_params)
-        self.swap_acc = 0
-        self.swap_prop = 0
-
-    def generate_model_params(self):
-        """
-        generate starting model parameters. calculate likelihood of the parameters.
-        loop until the parameters are valid and the forward_model doesn't fail.
-        """
-        valid_params = False
-        while not valid_params:
-            model_params = super().generate_model_params()
-            # get simulated true phase dispersion
-            # *** ... if there's an error here, it shouldn't be the starting model... ***
-            try:
-                self.logL = self.get_likelihood(model_params)  # set model likelihood
-                valid_params = True
-            except (DispersionError, ZeroDivisionError):
-                pass
 
         return model_params
 
-    def perturb_params(self, scale_factor):
+    def get_optimization_model(
+        self,
+        param_bounds,
+        data,
+        T_0=100,
+        epsilon=0.95,
+        ts=100,
+        n_steps=1000,
+    ):
+        """
+        :param T_0: initial temp
+        :param epsilon: decay factor of temperature
+        :param ts: number of temperature steps
+        :param n_steps: number of balancing steps at each temp
+        """
+
+        temps = np.zeros(ts)
+        temps[0] = T_0
+
+        for k in range(1, ts):
+            temps[k] = temps[k - 1] * epsilon
+
+        # temps = np.ones(ts)
+
+        results = {
+            "temps": [],  # temps,
+            # "params": [],
+            "thickness": [],
+            "vel_s": [],
+            "vel_p": [],
+            "density": [],
+            "logL": [],
+        }
+
+        # reduce logarithmically
+        for T in temps:
+            print("\ntemp", T)
+            # number of steps at this temperature
+            for _ in range(n_steps):
+                print(_)
+                # perturb each parameter
+                # if using the perturb params function, it does the acceptance rate stats in the function
+                self.perturb_params(param_bounds, data, T=T)
+
+                results["temps"].append(T)
+                results["thickness"].append(self.thickness.copy())
+                results["vel_s"].append(self.vel_s.copy())
+                results["vel_p"].append(self.vel_p.copy())
+                results["density"].append(self.density.copy())
+                results["logL"].append(self.logL)
+
+        df = pd.DataFrame(results)
+        df.to_csv("./results/inversion/optimize_model.csv")
+
+    def perturb_params(
+        self,
+        param_bounds,
+        data,
+        rotation=False,
+        T=None,
+        sample_prior=False,
+        prior_dist="cauchy",
+    ):
         """
         loop over each model parameter, perturb its value, validate the value,
         calculate likelihood, and accept the new model with a probability.
 
         :param scale_factor:
         """
-        # normalizing, rotating
-        test_params = (self.model_params - self.param_bounds[:, 0]) / self.param_bounds[
-            :, 2
-        ]
-        test_params = np.matmul(np.transpose(self.rot_mat), test_params)
+        # should be validating params, generate until have valid values
+        # get bounds in rotated space? validate in rotated space...
 
-        # *** Cauchy proposal, check other options ***
-        # *** figure out what the scale_factor is.. ***
-        # generate params to try; Cauchy proposal
-        test_params += (
-            scale_factor
-            * self.sigma_model
-            * np.tan(np.pi * (np.random.rand(len(test_params)) - 0.5))
-        )
+        if rotation:
+            # normalizing params
+            # double check ***
+            norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
+            # rotating params
+            rotated_params = np.matmul(np.transpose(self.rot_mat), norm_params)
+            rotated_bounds = np.matmul(
+                np.transpose(self.rot_mat), param_bounds[:, :1] - param_bounds[:, 0]
+            )
 
-        # rotating back and scaling again
-        test_params = np.matmul(self.rot_mat, test_params)
-        test_params = self.param_bounds[:, 0] + (test_params * self.param_bounds[:, 2])
+            # validate params
 
-        # boolean array of valid params
-        valid_params = (test_params >= self.param_bounds[:, 0]) & (
-            test_params <= self.param_bounds[:, 1]
-        )
+            # rotating back
+            perturbed_norm_params = np.matmul(self.rot_mat, perturbed_rotated_params)
+            # rescaling
+            perturbed_params = param_bounds[:, 0] + (
+                perturbed_norm_params * param_bounds[:, 2]
+            )
 
-        # loop over params and perturb
-        for ind in np.arange(self.n_params)[valid_params]:
-            # calculate new likelihood
-            try:
-                logL_new = self.get_likelihood(
-                    test_params,
+        # thickness_scale, vel_s_scale = 10, 100
+        thickness_scale, vel_s_scale = 0.001, 0.001
+        # thickness_scale, vel_s_scale = 1, 1
+        # loop over params and perturb each individually
+        for ind in range(len(self.thickness)):
+            test_thickness = self.thickness.copy()
+            # uniform distribution
+            if prior_dist == "uniform":
+                test_thickness[ind] += (
+                    (np.random.uniform() - 0.5)
+                    * thickness_scale
+                    * self.sigma_model["thickness"]
+                    * (param_bounds["thickness"][1] - param_bounds["thickness"][0])
+                    / 2
                 )
-            except (DispersionError, ZeroDivisionError):
-                continue
+            elif prior_dist == "cauchy":
+                # cauchy distribution
+                test_thickness[ind] += (
+                    self.sigma_model["thickness"]
+                    * thickness_scale
+                    * np.tan(np.pi * (np.random.uniform() - 0.5))
+                )
 
-            # Compute likelihood ratio in log space:
-            dlogL = logL_new - self.logL
-            if dlogL == 0:
-                continue
+            test_velocity_model, valid_params = self.get_velocity_model(
+                param_bounds, test_thickness, self.vel_s.copy()
+            )
 
-            xi = np.random.rand(1)
-            # Apply MH criterion (accept/reject)
-            if xi <= np.exp(dlogL):
+            # check acceptance criteria
+            acc = self.acceptance_criteria(
+                test_velocity_model, valid_params, data, sample_prior=sample_prior, T=T
+            )
+            if acc:
+                self.thickness = test_thickness.copy()
                 self.swap_acc += 1
-                self.model_params[ind] = test_params[ind]
-                self.logL = logL_new
-            else:
+            elif not sample_prior:
                 self.swap_prop += 1
+
+        for ind in range(len(self.vel_s)):
+            test_vel_s = self.vel_s.copy()
+            if prior_dist == "uniform":
+                # uniform distribution
+                test_vel_s[ind] += (
+                    (np.random.uniform() - 0.5)
+                    * vel_s_scale
+                    * self.sigma_model["vel_s"]
+                    * (param_bounds["vel_s"][1] - param_bounds["vel_s"][0])
+                    / 2
+                )
+            elif prior_dist == "cauchy":
+                # cauchy distribution
+                test_vel_s[ind] += (
+                    self.sigma_model["vel_s"]
+                    * vel_s_scale
+                    * np.tan(np.pi * (np.random.uniform() - 0.5))
+                )
+
+            test_velocity_model, valid_params = self.get_velocity_model(
+                param_bounds, self.thickness.copy(), test_vel_s
+            )
+
+            # check acceptance criteria
+            acc = self.acceptance_criteria(
+                test_velocity_model, valid_params, data, sample_prior=sample_prior, T=T
+            )
+            if acc:
+                self.vel_s = test_vel_s.copy()
+                self.swap_acc += 1
+            elif not sample_prior:
+                self.swap_prop += 1
+
+    def acceptance_criteria(
+        self, test_velocity_model, valid_params, data, T, sample_prior
+    ):
+        if not valid_params:
+            return False
+        if sample_prior:
+            logL_new = 1
+            return True
+
+        try:
+            logL_new, data_pred_new = self.get_likelihood(test_velocity_model, data)
+        except (DispersionError, ZeroDivisionError):
+            # add specific condition here for failed forward model
+            self.swap_err += 1
+            return False
+
+        # Compute likelihood ratio in log space:
+        dlogL = logL_new - self.logL
+        if T is not None:
+            dlogL = dlogL / T
+
+        xi = np.random.rand(1)
+        # Apply MH criterion (accept/reject)
+        if dlogL < 0 or xi <= np.exp(-dlogL):
+            self.swap_acc += 1
+            self.logL = logL_new
+            self.data_pred = data_pred_new
+            return True
+        else:
+            self.swap_prop += 1
+            return False
 
     def get_derivatives(
         self,
+        periods,
         n_sizes,
-        size_scale,
-        init_step_size_scale,
-        phase_vel_diff_bounds,
+        data_diff_bounds,
     ):
         """
         calculate the jacobian for the model
 
         :param n_sizes: number of step sizes to try
-        :param size_scale:
-        :param init_step_size_scale:
         :param phase_vel_diff_bounds:
         """
         # propose n_dm=50 step sizes. compute all for all params. find flat section and optimal derivative. add prior
         # estimate to make it stable finding where the derivative is flat to find best / stable value of the derivative
         # for the jacobian.
-        # *** validate, go over this again with n_data ***
-        step_sizes = np.zeros((self.n_params, n_sizes))
-        # set initial step size
-        step_sizes[:, 0] = self.model_params * init_step_size_scale
-        model_derivatives = np.zeros((self.n_params, n_sizes, self.n_data))
+
+        # step size is scaled from the param range
+        # size_scale = 1.5
+        # init_step_size_scale = 0.1
+        step_scales = np.linspace(0.1, 0.001, n_sizes)
+
+        step_sizes = np.repeat(step_scales, self.n_params) * self.model_params[:, 2]
+
+        model_derivatives = np.zeros((self.n_params, self.n_data, n_sizes))
 
         # estimate deriv for range of dm values
-        for size_ind in range(n_sizes):
-            model_pos = self.model_params + step_sizes[:, size_ind]
-            model_neg = self.model_params - step_sizes[:, size_ind]
+        for param_ind in range(self.n_params):
+            model_pos = self.model_params + step_sizes[param_ind, :]
+            model_neg = self.model_params - step_sizes[param_ind:, :]
 
-            for param_ind in range(self.n_params):
-                # *** double check these conditions... ***
-                model_pos[param_ind] = (
-                    model_pos[param_ind] + step_sizes[param_ind, size_ind]
+            model_pos[param_ind] = model_pos[param_ind] + step_sizes[param_ind, :]
+
+            try:
+                data_pos = self.forward_model(periods, model_pos)
+                data_neg = self.forward_model(periods, model_neg)
+
+                # calculate the change in phase velocity over change in model param
+                # unitless difference between positive and negative phase velocities
+                data_diff = np.abs((data_pos - data_neg) / (data_pos + data_neg))
+
+                # calculate centered derivative for values with reasonable differences(?)
+                inds = (data_diff > data_diff_bounds[0]) & (
+                    data_diff < data_diff_bounds[1]
                 )
-
-                try:
-                    phase_vel_pos = self.forward_model(model_pos)
-                    phase_vel_neg = self.forward_model(model_neg)
-
-                    # calculate the change in phase velocity over change in model param
-                    # unitless difference between positive and negative phase velocities
-                    # ***
-                    phase_vel_diff = np.abs(
-                        (phase_vel_pos - phase_vel_neg)
-                        / (phase_vel_pos + phase_vel_neg)
-                    )
-
-                    inds = (phase_vel_diff > phase_vel_diff_bounds[0]) & (
-                        phase_vel_diff < phase_vel_diff_bounds[1]
-                    )
-                    np.put(
-                        model_derivatives[param_ind, size_ind, :],
-                        inds,
-                        (
-                            # calculating the centered derivative
-                            (phase_vel_pos - phase_vel_neg)
-                            / (2 * step_sizes[param_ind, size_ind]),
-                        ),
-                    )
-                except (DispersionError, ZeroDivisionError) as e:
-                    pass
-
-                if size_ind == n_sizes - 1:
-                    break
-                # setting step sizes for the next loop
-                step_sizes[:, size_ind + 1] = step_sizes[:, size_ind] / size_scale
+                model_derivatives[:, :, inds] = (data_pos - data_neg) / (
+                    2 * step_sizes[param_ind, inds]
+                )
+            except (DispersionError, ZeroDivisionError) as e:
+                pass
 
         return model_derivatives
 
     def get_jacobian(
         self,
-        n_sizes=50,
-        size_scale=1.5,
-        init_step_size_scale=0.1,
-        phase_vel_diff_bounds=[1.0e-7, 5],
     ):
         """
-        finding the step size where the derivative is best (flattest) (??)
+        finding the step size where the derivative is stable (flat)
         """
+        n_sizes = 50
+        phase_vel_diff_bounds = [1.0e-7, 5]
+
         model_derivatives = self.get_derivatives(
-            n_sizes, size_scale, init_step_size_scale, phase_vel_diff_bounds
-        )
+            n_sizes, phase_vel_diff_bounds
+        )  # [param, deriv, data]
 
-        # *** also will need to double check this indexing.... ***
         Jac = np.zeros((self.n_data, self.n_params))
-        # can prolly simplify these loops ***
-        for param_ind in range(self.n_params):
-            for data_ind in range(
-                self.n_data
-            ):  # For each datum, choose best derivative estimate
-                best = 1.0e10
-                ibest = 1
 
-                # model_derivatives = np.zeros((self.n_params, n_sizes, self.n_data))
-                for size_ind in range(n_sizes - 2):
-                    # check if the derivative will very very large, and set those to a set max value.
-                    if np.any(
-                        np.abs(
-                            model_derivatives[
-                                param_ind, size_ind : size_ind + 2, data_ind
-                            ]
-                        )
-                        < 1.0e-7
-                    ):
-                        test = 1.0e20
-                    else:
-                        # *** sum of the absolute value of the ......... uhhhh
-                        # *** or is it abs of the sum.. :/
-                        # i don't think this comparaison is right.
-                        test = np.sum(
-                            np.abs(
-                                (
-                                    model_derivatives[
-                                        param_ind, data_ind, size_ind : size_ind + 1
-                                    ]
-                                    / model_derivatives[
-                                        param_ind, data_ind, size_ind + 1 : size_ind + 2
-                                    ]
-                                )
-                                / 2
-                                - 1
-                            )
-                        )
+        # get indices of derivatives that are too small
+        small_indices = []
+        large_indices = []
+        best_indices = []
+        for s in range(n_sizes - 2):
+            small_indices.append(
+                np.any(np.abs(model_derivatives[:, s : s + 2, :]) < 1.0e-7)
+            )
+            large_indices.append(
+                np.any(np.abs(model_derivatives[:, s : s + 2, :]) > 1.0e10)
+            )
+            # want three in a row
+            # smallest difference between them?
+            # absolute value of the sum of the left and right derivatives
 
-                    if (test < best) and (test > 1.0e-7):
-                        best = test
-                        ibest = size_ind + 1
+            flatness = np.sum(model_derivatives[:, s : s + 2, :])
+            best = np.argmin(flatness)
+            best_indices.append(model_derivatives[:, best, :])
 
-                Jac[data_ind, param_ind] = model_derivatives[
-                    param_ind, ibest, data_ind
-                ]  # Best deriv into Jacobian
-                if best > 1.0e10:
-                    Jac[data_ind, param_ind] = 0.0
+        Jac = model_derivatives[:, best_indices, :]
 
         return Jac
 
-    def lin_rot(self, variance):
+    def linearized_rotation(self, param_bounds):
         """
         making a linear approximation of the rotation matrix and variance for the params.
 
-        :param param_bounds:
-        :param sigma_model: uncertainty in the data
-        :param variance: from trial and error?
+        :param variance: from the uniform distribution/ prior
 
         :return sigma_pcsd:
         """
         Jac = self.get_jacobian()
         # Scale columns of Jacobian for stability
-        # *** validate ***
         Jac = Jac * self.param_bounds[:, 2]  # multiplying by parameter range
 
         # Uniform bounded priors of width Δmi are approximated by taking C_p to be a diagonal matrix with
-        # variances equal to those of the uniform distributions, i.e., ( Δmi ) 12.
-        # prior model covariance matrix representing an assumed Gaussian prior density about the current model
-        cov_prior_inv = np.diag(self.n_params * [1 / variance])
+        cov_prior_inv = np.diag(self.n_params * [1 / param_bounds[:, 2]])
 
         # the data covariance matrix
-        # *** validate this sigma_model ***
-        cov_data_inv = np.diag(self.n_data * [self.beta / self.sigma_model**2])
+        cov_data_inv = np.diag(self.n_data * [self.beta / self.sigma_data**2])
 
         cov_cur = (
             np.matmul(np.matmul(np.transpose(Jac), cov_data_inv), Jac) + cov_prior_inv
         )
 
-        # singular value decomposition.
-        # the singular values, within each vector sorted in descending order.
         # parameter variance in PC space (?)
         rot_mat, s, _ = np.linalg.svd(cov_cur)
         sigma_model = 1 / (2 * np.sqrt(np.abs(s)))  # PC standard deviations
 
-        print("cov_cur", cov_cur.shape)
-        print("rot_mat", rot_mat.shape)
-        print("s", s.shape)
-        print("sigma_model", sigma_model.shape)
+        return rot_mat, sigma_model
 
-        return sigma_model, rot_mat
-
-    def get_likelihood(self, test_params):
+    def get_likelihood(self, velocity_model, data):
         """
-        :param params: test params to calculate likelihood with
-        :param data_obs: the observed data, used to calculate residuals
+        :param model_params: params to calculate likelihood with
         """
-        # from the velocity model, calculate phase velocity and compare to true data.
-        n_params = len(test_params)  # *** get_likelihood is used in initialization
+        # return 1, periods
         try:
-            phase_vel_cur = self.forward_model(test_params)
-            sigma_model = self.get_sigma_model(test_params)
-            residuals = self.data_obs - phase_vel_cur
+            data_pred = self.forward_model(data.periods, velocity_model)
+            residuals = data.data_obs - data_pred
+            # for identical errors
+            # logL = np.sum(residuals**2) / (self.sigma_model**2)
+            logL = (residuals**2).T @ (1 / data.data_cov) @ (data.sigma_data**2)
 
-            logL = -(1 / 2) * n_params * np.log(sigma_model) - np.sum(
-                residuals**2
-            ) / (2 * sigma_model**2)
-            return np.sum(logL)
+            return logL, data_pred
 
         except (DispersionError, ZeroDivisionError) as e:
             raise e
@@ -511,20 +619,32 @@ class ChainModel(Model):
     def update_model_hist(self):
         """
         updating the hist for this model, which stores parameter values from all the models
-
-        :param param_bounds:
         """
+        # The bins for this hist should be the param bounds
         for ind in range(self.n_params):
-            # getting bins for the param,
-            edge = self.bins[:, ind]
-            idx_diff = np.argmin(abs(edge - self.model_params[ind]))
-            self.model_hist[idx_diff, ind] += 1
+            counts, bins = np.histogram(x, n_bins)
 
-    def update_covariance_matrix(self, update_rot_mat):
-        """
-        :param update_rot_mat: whether or not to update the rotation matrix. this also updates sigma_model.
-            after the burn-in, we switch to calculating the rotation matrix from the covariance matrix.
-        """
+            # getting bins for the param,
+            # edge = self.bins[:, ind]
+            # idx_diff = np.argmin(abs(edge - self.model_params[ind]))
+            # self.model_hist[idx_diff, ind] += 1
+
+    def update_rotation_matrix(self, burn_in):
+        # for burn in period, update rotation matrix by linearization
+        # after burn in, start saving samples in covariance matrix
+        # after burn in (and cov mat stabilizes) start using cov mat to get rotation matrix
+        # update covariance matrix
+
+        if burn_in:
+            # linearize
+            rot_mat, sigma_model = self.linearized_rotation(self.param_bounds)
+        else:
+            rot_mat, sigma_model = self.update_covariance_matrix()
+
+        self.rot_mat, self.sigma_model = rot_mat, sigma_model
+
+    def update_covariance_matrix(self):
+        """ """
         # normalizing
         normalized_model = (
             self.model_params - self.param_bounds[:, 0]
@@ -535,6 +655,7 @@ class ChainModel(Model):
 
         # *** validate this ****
         mean_model = self.mean_model_sum / self.n_cov
+
         self.cov_mat_sum = self.cov_mat_sum + np.outer(
             np.transpose(normalized_model - mean_model),
             normalized_model - mean_model,
@@ -550,9 +671,12 @@ class ChainModel(Model):
                 self.cov_mat[row, col] /= np.sqrt(  # invalid scalar divide
                     self.cov_mat[row, row] * self.cov_mat[col, col]
                 )
-        # after burn in is over, update covariance rot_mat and s from cov_mat
-        if update_rot_mat:
-            self.rot_mat, s, _ = np.linalg.svd(
-                self.cov_mat
-            )  # rotate it to its Singular Value Decomposition
-            self.sigma_model = np.sqrt(s)
+
+        rot_mat, s, _ = np.linalg.svd(
+            self.cov_mat
+        )  # rotate it to its Singular Value Decomposition
+        sigma_model = np.sqrt(s)
+
+        # s is the step size? sampling based on sigma_model
+
+        return rot_mat, sigma_model

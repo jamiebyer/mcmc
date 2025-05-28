@@ -1,6 +1,7 @@
 # *** can this be in init?
 import sys
 import os
+
 sys.path.append(os.path.dirname(os.path.realpath(__file__)) + "/../src")
 
 import xarray as xr
@@ -11,44 +12,10 @@ from inversion import Inversion
 
 import asyncio
 
-"""
-DEFAULT VALUES FOR RUNNING INVERSION
-
-true_model_kwargs = {
-    "poisson_ratio": 0.265,
-    "density_params": [540.6, 360.1],  # *** check units ***
-    "n_data": 10,
-    "n_layers": 10,
-    "layer_bounds": [5e-3, 15e-3],  # km
-    "vel_s_bounds": [2, 6],  # km/s
-    "sigma_pd_bounds": [0, 1],
-}
-inversion_kwargs = {
-    "poisson_ratio": 0.265,
-    "density_params": [540.6, 360.1],  # *** check units ***
-    "n_layers": 10,
-    "n_chains": 2,
-    "beta_spacing_factor": 1.15,
-    "model_variance": 12,
-    "n_bins": 200,
-    "n_burn": 10000,
-    "n_keep": 2000,
-    "n_rot": 40000,
-}
-run(
-    true_model_kwargs,
-    inversion_kwargs,
-    n_data=10,
-    max_perturbations=10,
-    hist_conv=0.05,
-    out_dir="/out/inversion_results",
-)
-"""
 
 def setup_inversion_obj():
     inversion = run(out_dir="/test_inversion_results")
     return inversion
-
 
 
 def create_test_file():
@@ -79,13 +46,13 @@ def test_run():
         "n_layers": 2,
         "n_chains": 1,
     }
-    max_perturbations=1,
+    max_perturbations = (1,)
 
     param_bounds, true_model = setup_scene(**true_model_kwargs)
 
-    vel_s = [3.50, 4.00] # km/s
-    thickness = [27e-3, 40e-3] # in km..
-    #true_model.vel_s = vel_s
+    vel_s = [3.50, 4.00]  # km/s
+    thickness = [27e-3, 40e-3]  # in km..
+    # true_model.vel_s = vel_s
     true_model.model_params[true_model.n_layers : 2 * true_model.n_layers] = vel_s
     true_model.model_params[: true_model.n_layers] = thickness
 
@@ -109,7 +76,9 @@ def test_run():
         inversion.random_walk(max_perturbations, hist_conv=0.05, out_dir="./tests/out/")
     )
 
+
 # test convergence
+
 
 def test_generating_model_params():
     # right now they seem bad.
@@ -140,9 +109,7 @@ def test_get_betas():
 
         n_betas = np.sum(betas == 1)
         assert n_betas >= 0.25
-        assert n_betas <= 0.50 
-
-
+        assert n_betas <= 0.50
 
 
 def test_parallel_computing():
@@ -154,5 +121,5 @@ def test_rotation():
     pass
 
 
-#create_test_file()
+# create_test_file()
 test_run()

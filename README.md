@@ -1,4 +1,4 @@
-**MCMC Bayesian inversion**
+# MCMC Bayesian inversion
 
 **Description**
 - using parallel tempering
@@ -6,6 +6,7 @@
 **Usage**
 - install the environment with either `conda env create -f environment.yml` or `conda create -n env_name -f requirements.txt`
 - (create environment files with `conda env export > environment.yml` or `conda list -e > requirements.txt`)
+- **Note**: for disba, python version must be 
 
 **Running from terminal**
 - how to run from terminal (input variables)
@@ -35,8 +36,6 @@
 
 **Plotting from terminal**
 - In terminal call `python plotting.py`
-
-
 
 
 
