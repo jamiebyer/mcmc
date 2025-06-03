@@ -3,7 +3,7 @@ import sys
 
 from disba import PhaseDispersion
 from disba._exception import DispersionError
-from inversion.forward_model import Model
+from inversion.model import Model
 from dask.distributed import Client
 import os
 import xarray as xr
@@ -189,6 +189,7 @@ class Inversion:
     def random_walk(
         self,
         max_perturbations,
+        proposal_distribution,
         hist_conv,
         save_burn_in=True,
         rotation=False,
@@ -204,13 +205,12 @@ class Inversion:
         :param save_burn_in:
         """
         if not out_filename:
-            out_dir = "./results/inversion/results" + str(int(time.time())) + ".nc"
+            out_dir = "./results/inversion/results-" + str(int(time.time())) + ".nc"
         else:
-            out_dir = "./results/inversion/results" + out_filename + ".nc"
+            out_dir = "./results/inversion/results-" + out_filename + ".nc"
         # all chains need to be on the same step number to compare
         # async with Client(asynchronous=True) as client:
         for n_steps in range(self.n_mcmc):
-            print("\n", n_steps)
             burn_in = n_steps < self.n_burn
             # save burn in: whether or not to save samples from burn in stage
             # (diff file?, labeled?)
@@ -243,7 +243,10 @@ class Inversion:
                 )
                 """
                 updated_model = self.perform_step(
-                    chain_model, max_perturbations, sample_prior=sample_prior
+                    chain_model,
+                    max_perturbations,
+                    proposal_distribution,
+                    sample_prior=sample_prior,
                 )
                 # update model param hist
                 # add back in later
@@ -276,6 +279,7 @@ class Inversion:
         self,
         chain_model,
         max_perturbations,
+        proposal_distribution,
         sample_prior=False,
     ):
         """
@@ -289,6 +293,7 @@ class Inversion:
             chain_model.perturb_params(
                 self.param_bounds,
                 self.data,
+                proposal_distribution,
                 sample_prior=sample_prior,
             )
 
@@ -499,8 +504,7 @@ class Inversion:
                 with xr.open_dataset(out_dir, mode="a") as ds_full:
                     # ds_results.to_zarr(out_dir, append_dim="step")
                     # ds_full = xr.open_dataset(out_dir)  # , engine="netcdf4")
-                    print(ds_full)
-                    print(ds_results)
+                    
                     ds = xr.concat([ds_full, ds_results], dim="step")
                     # combined_ds = xr.combine_by_coords(
                     #    [ds_full, ds_results]

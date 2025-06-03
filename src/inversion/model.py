@@ -4,7 +4,6 @@ from disba._exception import DispersionError
 import pandas as pd
 from scipy import interpolate
 import matplotlib.pyplot as plt
-from fk_processing.run_geopsy import get_dispersion_curve
 
 np.complex_ = np.complex64
 
@@ -16,9 +15,9 @@ class Data:
         self.n_data = len(self.data_obs)
         self.sigma_data = sigma_data
 
-        if len(sigma_data) == self.n_data:
+        if isinstance(sigma_data, list) and len(sigma_data) == self.n_data:
             self.data_cov = np.diag(sigma_data**2)
-        elif len(sigma_data) == 1:
+        elif isinstance(sigma_data, float):
             self.data_cov = np.eye(self.n_data) * sigma_data
 
 
@@ -32,7 +31,7 @@ class FieldData(Data):
         """
         read dispersion curve
         """
-        freqs, phase_vels, stds = get_dispersion_curve(path)
+        freqs, phase_vels, stds = None, None, None  # get_dispersion_curve(path)
         periods = 1 / freqs
         # sort
 
@@ -58,7 +57,6 @@ class SyntheticData(Data):
 
 
 class GeneratedData(Data):
-
     def __init__(self, periods, sigma_data, bounds, n_layers):
         # velocity_model = np.array([thickness + [0], vel_p, vel_s, density])
         data_true, data_obs = self.generate_observed_data(
@@ -346,10 +344,10 @@ class Model:
         self,
         param_bounds,
         data,
+        proposal_distribution,
         rotation=False,
         T=None,
         sample_prior=False,
-        prior_dist="cauchy",
     ):
         """
         loop over each model parameter, perturb its value, validate the value,
@@ -362,7 +360,6 @@ class Model:
 
         if rotation:
             # normalizing params
-            # double check ***
             norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
             # rotating params
             rotated_params = np.matmul(np.transpose(self.rot_mat), norm_params)
@@ -380,13 +377,13 @@ class Model:
             )
 
         # thickness_scale, vel_s_scale = 10, 100
-        thickness_scale, vel_s_scale = 0.001, 0.001
-        # thickness_scale, vel_s_scale = 1, 1
+        # thickness_scale, vel_s_scale = 0.001, 0.001
+        thickness_scale, vel_s_scale = 1, 1
         # loop over params and perturb each individually
         for ind in range(len(self.thickness)):
             test_thickness = self.thickness.copy()
             # uniform distribution
-            if prior_dist == "uniform":
+            if proposal_distribution == "uniform":
                 test_thickness[ind] += (
                     (np.random.uniform() - 0.5)
                     * thickness_scale
@@ -394,7 +391,7 @@ class Model:
                     * (param_bounds["thickness"][1] - param_bounds["thickness"][0])
                     / 2
                 )
-            elif prior_dist == "cauchy":
+            elif proposal_distribution == "cauchy":
                 # cauchy distribution
                 test_thickness[ind] += (
                     self.sigma_model["thickness"]
@@ -418,7 +415,7 @@ class Model:
 
         for ind in range(len(self.vel_s)):
             test_vel_s = self.vel_s.copy()
-            if prior_dist == "uniform":
+            if proposal_distribution == "uniform":
                 # uniform distribution
                 test_vel_s[ind] += (
                     (np.random.uniform() - 0.5)
@@ -427,7 +424,7 @@ class Model:
                     * (param_bounds["vel_s"][1] - param_bounds["vel_s"][0])
                     / 2
                 )
-            elif prior_dist == "cauchy":
+            elif proposal_distribution == "cauchy":
                 # cauchy distribution
                 test_vel_s[ind] += (
                     self.sigma_model["vel_s"]
@@ -609,7 +606,11 @@ class Model:
             residuals = data.data_obs - data_pred
             # for identical errors
             # logL = np.sum(residuals**2) / (self.sigma_model**2)
-            logL = (residuals**2).T @ (1 / data.data_cov) @ (data.sigma_data**2)
+
+            cov_inv = data.data_cov
+            cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
+
+            logL = residuals.T @ cov_inv @ residuals
 
             return logL, data_pred
 

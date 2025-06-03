@@ -1,14 +1,13 @@
-from inversion.forward_model import SyntheticData, FieldData, GeneratedData
-from plotting.inversion_plotting import *
-from plotting.data_plotting import *
+from inversion.model import SyntheticData, FieldData, GeneratedData
+from plotting.plot_inversion import *
 from inversion.inversion import Inversion
-from fk_processing.read_mseed import *
 import asyncio
 import numpy as np
+
 from tests.test_inversion import *
 
 
-def run_inversion(data_type="field_data"):
+def run_inversion(data_type="synthetic_data"):
     np.random.seed(0)
 
     bounds = {
@@ -70,7 +69,7 @@ if __name__ == "__main__":
     # in_path = "./results/inversion/results1745810948.nc"
     in_path = "./results/inversion/results1745812372.nc"
 
-    # run_inversion()
+    run_inversion()
 
     # plot_dispersion_curve()
     # plot_array_response()

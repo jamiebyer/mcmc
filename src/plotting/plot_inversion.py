@@ -7,7 +7,7 @@ import re
 import xarray as xr
 from matplotlib.colors import LogNorm
 from disba import PhaseDispersion
-from inversion.forward_model import Model
+from inversion.model import Model
 
 # import statsmodels.api as sm
 
@@ -103,16 +103,8 @@ def plot_rotation_params(out_dir):
 
     rot_mat_results = rot_mat_results.apply(ast.literal_eval)
 
-    # print(rot_mat_results)
     rot_mat_results = np.array([np.array(r) for r in rot_mat_results]).T
 
-    # print(rot_mat_results)
-
-    # print(rot_mat_results)
-    # print(sigma_pd_results)
-
-    # plt.plot(sigma_pd_results)
-    # plt.show()
     rot_mag = [np.linalg.norm(mat) for mat in rot_mat_results]
 
     print(np.min(rot_mag), np.max(rot_mag))
