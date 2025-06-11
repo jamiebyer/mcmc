@@ -236,15 +236,16 @@ class Model:
         valid_vel_s = (vel_s >= param_bounds["vel_s"][0]) & (
             vel_s <= param_bounds["vel_s"][1]
         )
+        """
         valid_vel_p = (vel_p >= param_bounds["vel_p"][0]) & (
             vel_p <= param_bounds["vel_p"][1]
         )
         valid_density = (density >= param_bounds["density"][0]) & (
             density <= param_bounds["density"][1]
         )
-
+        """
         valid_params = np.all(
-            valid_thickness & valid_vel_s & valid_vel_p & valid_density
+            valid_thickness & valid_vel_s  # & valid_vel_p & valid_density
         )
 
         return velocity_model, valid_params
@@ -345,6 +346,7 @@ class Model:
         param_bounds,
         data,
         proposal_distribution,
+        scale_factor,
         rotation=False,
         T=None,
         sample_prior=False,
@@ -355,10 +357,9 @@ class Model:
 
         :param scale_factor:
         """
-        # should be validating params, generate until have valid values
-        # get bounds in rotated space? validate in rotated space...
 
         if rotation:
+            """
             # normalizing params
             norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
             # rotating params
@@ -375,21 +376,23 @@ class Model:
             perturbed_params = param_bounds[:, 0] + (
                 perturbed_norm_params * param_bounds[:, 2]
             )
+            """
+            pass
 
-        # thickness_scale, vel_s_scale = 10, 100
-        # thickness_scale, vel_s_scale = 0.001, 0.001
-        thickness_scale, vel_s_scale = 1, 1
+        thickness_scale, vel_s_scale = scale_factor
         # loop over params and perturb each individually
+        # *** currently hard-coded for velocity and thickness. generalize later;
+        # remove duplicate code. ***
+
+        # loop over each thickness
         for ind in range(len(self.thickness)):
             test_thickness = self.thickness.copy()
             # uniform distribution
             if proposal_distribution == "uniform":
-                test_thickness[ind] += (
-                    (np.random.uniform() - 0.5)
-                    * thickness_scale
-                    * self.sigma_model["thickness"]
-                    * (param_bounds["thickness"][1] - param_bounds["thickness"][0])
-                    / 2
+                test_thickness[ind] = param_bounds["thickness"][
+                    0
+                ] + np.random.uniform() * (
+                    param_bounds["thickness"][1] - param_bounds["thickness"][0]
                 )
             elif proposal_distribution == "cauchy":
                 # cauchy distribution
@@ -399,13 +402,14 @@ class Model:
                     * np.tan(np.pi * (np.random.uniform() - 0.5))
                 )
 
-            test_velocity_model, valid_params = self.get_velocity_model(
+            # assemble test params and check bounds
+            test_model, valid_params = self.get_velocity_model(
                 param_bounds, test_thickness, self.vel_s.copy()
             )
 
             # check acceptance criteria
             acc = self.acceptance_criteria(
-                test_velocity_model, valid_params, data, sample_prior=sample_prior, T=T
+                test_model, valid_params, data, sample_prior=sample_prior, T=T
             )
             if acc:
                 self.thickness = test_thickness.copy()
@@ -417,12 +421,8 @@ class Model:
             test_vel_s = self.vel_s.copy()
             if proposal_distribution == "uniform":
                 # uniform distribution
-                test_vel_s[ind] += (
-                    (np.random.uniform() - 0.5)
-                    * vel_s_scale
-                    * self.sigma_model["vel_s"]
-                    * (param_bounds["vel_s"][1] - param_bounds["vel_s"][0])
-                    / 2
+                test_vel_s[ind] = param_bounds["vel_s"][0] + np.random.uniform() * (
+                    param_bounds["vel_s"][1] - param_bounds["vel_s"][0]
                 )
             elif proposal_distribution == "cauchy":
                 # cauchy distribution
@@ -432,44 +432,44 @@ class Model:
                     * np.tan(np.pi * (np.random.uniform() - 0.5))
                 )
 
-            test_velocity_model, valid_params = self.get_velocity_model(
+            test_model, valid_params = self.get_velocity_model(
                 param_bounds, self.thickness.copy(), test_vel_s
             )
 
             # check acceptance criteria
             acc = self.acceptance_criteria(
-                test_velocity_model, valid_params, data, sample_prior=sample_prior, T=T
+                test_model, valid_params, data, sample_prior=sample_prior, T=T
             )
             if acc:
                 self.vel_s = test_vel_s.copy()
                 self.swap_acc += 1
             elif not sample_prior:
+                # self.vel_s = self.vel_s.copy()
                 self.swap_prop += 1
 
-    def acceptance_criteria(
-        self, test_velocity_model, valid_params, data, T, sample_prior
-    ):
+    def acceptance_criteria(self, test_model, valid_params, data, T, sample_prior):
         if not valid_params:
             return False
-        if sample_prior:
-            logL_new = 1
-            return True
 
-        try:
-            logL_new, data_pred_new = self.get_likelihood(test_velocity_model, data)
-        except (DispersionError, ZeroDivisionError):
-            # add specific condition here for failed forward model
-            self.swap_err += 1
-            return False
+        if sample_prior:
+            logL_new, data_pred_new = 1, np.empty(data.n_data)
+            # return True
+        else:
+            try:
+                logL_new, data_pred_new = self.get_likelihood(test_model, data)
+            except (DispersionError, ZeroDivisionError):
+                # add specific condition here for failed forward model
+                self.swap_err += 1
+                return False
 
         # Compute likelihood ratio in log space:
         dlogL = logL_new - self.logL
         if T is not None:
             dlogL = dlogL / T
 
-        xi = np.random.rand(1)
+        xi = np.random.uniform(1)
         # Apply MH criterion (accept/reject)
-        if dlogL < 0 or xi <= np.exp(-dlogL):
+        if xi <= np.exp(-dlogL):
             self.swap_acc += 1
             self.logL = logL_new
             self.data_pred = data_pred_new

@@ -66,10 +66,9 @@ def run_inversion(data_type="synthetic_data"):
 
 
 if __name__ == "__main__":
-    # in_path = "./results/inversion/results1745810948.nc"
-    in_path = "./results/inversion/results1745812372.nc"
+    in_path = "./results/inversion/results-.nc"
 
-    run_inversion()
+    # run_inversion()
 
     # plot_dispersion_curve()
     # plot_array_response()

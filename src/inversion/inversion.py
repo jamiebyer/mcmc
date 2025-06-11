@@ -60,7 +60,6 @@ class Inversion:
         self.n_rot = n_rot
 
         self.n_keep = n_keep
-        # self.n_mcmc = 100000 * n_keep  # number of steps for the random walk
         self.n_mcmc = 1000 * n_keep  # number of steps for the random walk
 
         # initialize chains, generate starting params.
@@ -97,11 +96,13 @@ class Inversion:
         """
         getting beta values to use for each chain.
 
-        :param beta_spacing_factor: determines the spacing between values of beta. smaller spacing will
-        have higher acceptance rates. larger spacing will explore more of the space. we want to tune
-        the spacing so our acceptance rate is 30-50%. dTlog should be larger than 1.
+        :param beta_spacing_factor: determines the spacing between values of beta.
+
         """
+        # smaller spacing will have higher acceptance rates. larger spacing will explore more of the space.
+        # we want to tune the spacing so our acceptance rate is 30-50%. dTlog should be larger than 1.
         # change beta steps vals based on acceptance rate
+
         # *** later could tune beta_spacing_factor as the inversion runs, looking at the acceptance rate every ~10 000 steps ***
 
         if self.n_chains == 1:
@@ -170,7 +171,7 @@ class Inversion:
                     model.logL, model.data_pred = model.get_likelihood(
                         velocity_model, self.data
                     )
-                except (DispersionError, ZeroDivisionError) as e:
+                except (DispersionError, ZeroDivisionError) as _:
                     valid_params = False
 
             model.thickness = thickness
@@ -191,6 +192,7 @@ class Inversion:
         max_perturbations,
         proposal_distribution,
         hist_conv,
+        scale_factor=[1, 1],
         save_burn_in=True,
         rotation=False,
         out_filename=None,
@@ -218,14 +220,6 @@ class Inversion:
 
             # checking whether to write samples
             # check if saving burn in, check if there is a chunk of n_keep samples to
-            if save_burn_in:
-                write_samples = (n_steps >= self.n_keep - 1) and (
-                    (np.mod(n_steps + 1, self.n_keep)) == 0
-                )
-            else:
-                write_samples = (n_steps >= self.n_burn - 1) and (
-                    np.mod(n_steps + 1, self.n_keep)
-                ) == 0
 
             # parallel computing
             delayed_results = []
@@ -246,6 +240,7 @@ class Inversion:
                     chain_model,
                     max_perturbations,
                     proposal_distribution,
+                    scale_factor=scale_factor,
                     sample_prior=sample_prior,
                 )
                 # update model param hist
@@ -269,9 +264,19 @@ class Inversion:
             # add back later ***
             # hist_diff = self.check_convergence(n_steps, hist_conv, out_dir)
             hist_diff = 0.5
-            n_samples = self.n_keep
             # saving sample and write to file
-            self.store_samples(hist_diff, n_steps, n_samples, out_dir, write_samples)
+
+            # save n_keep samples at a time
+            if save_burn_in:
+                write_samples = (n_steps + 1 >= self.n_keep) and (
+                    (np.mod(n_steps + 1, self.n_keep)) == 0
+                )
+            else:
+                # save samples past burn-in
+                write_samples = not burn_in and (np.mod(n_steps + 1, self.n_keep)) == 0
+
+            # store every sample; only write to file every n_keep samples.
+            self.store_samples(hist_diff, n_steps, self.n_keep, out_dir, write_samples)
             # hist_diff, n_step, n_samples, out_dir, write_samples
 
     # async def perform_step(
@@ -280,6 +285,7 @@ class Inversion:
         chain_model,
         max_perturbations,
         proposal_distribution,
+        scale_factor,
         sample_prior=False,
     ):
         """
@@ -287,13 +293,15 @@ class Inversion:
         perturb each param on the chain model and accept each new model with a likelihood.
         """
         # *** what kind of random distribution should this be, and should there be a lower bound...? ***
-        n_perturbations = int(np.random.uniform(max_perturbations))
+        # n_perturbations = int(np.random.uniform(max_perturbations))
+        n_perturbations = 1
         for _ in range(n_perturbations):
             # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
             chain_model.perturb_params(
                 self.param_bounds,
                 self.data,
                 proposal_distribution,
+                scale_factor=scale_factor,
                 sample_prior=sample_prior,
             )
 
@@ -397,8 +405,6 @@ class Inversion:
                 # maybe move this to model class
                 # self.stored_results["params"].append(chain.model_params.copy())
                 self.stored_results["thickness"].append(chain.thickness.copy())
-                if self.stored_results["thickness"][-1] > 0.1:
-                    print("stored failed")
                 self.stored_results["vel_s"].append(chain.vel_s.copy())
                 self.stored_results["vel_p"].append(chain.vel_p.copy())
                 self.stored_results["density"].append(chain.density.copy())

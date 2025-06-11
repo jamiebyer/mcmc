@@ -7,20 +7,18 @@ from plotting.plot_inversion import (
 )
 import matplotlib.pyplot as plt
 import xarray as xr
-
+import os
 from inversion.model import SyntheticData, Model
 from inversion.inversion import Inversion
 
+np.random.seed(0)
+
 
 # @pytest.mark.usefixtures("data", "model")
-@pytest.fixture
-def setup_data():
-    np.random.seed(0)
-
+# @pytest.fixture
+def setup_data(sigma_data):
     n_data = 50
     periods = np.flip(1 / np.logspace(0, 1.1, n_data))
-    # sigma_data = 0.005
-    sigma_data = 0.001
     data_kwargs = {
         "thickness": [0.03],
         "vel_s": [0.4, 1.5],
@@ -32,10 +30,32 @@ def setup_data():
     return data
 
 
-def test_sampling_prior(setup_data, rerun=True):
+def setup_true_model():
+    pass
+
+
+# TESTING BAYESIAN INVERSION
+
+
+def test_acceptance_criteria():
+    # try proposing a model out of bounds
+    # rejection records the same model twice
+    pass
+
+
+def test_sampling_prior(rerun=True, plot=True):
+    in_path = "./results/inversion/results-sample_prior.nc"
     # likelihood always returns 1
     if rerun:
-        data = setup_data
+        # deleting test file if it exists
+        if os.path.isfile(in_path):
+            # *** make sure .nc is written in a context manager by the end
+            f = open(in_path, "r")
+            f.close()
+            os.remove(in_path)
+
+        # set up data and inversion params
+        data = setup_data(sigma_data=0.01)
         bounds = {
             "thickness": [0.001, 0.1],  # km
             "vel_p": [0.1, 6],  # km/s
@@ -51,7 +71,7 @@ def test_sampling_prior(setup_data, rerun=True):
             "param_bounds": bounds,
             "n_bins": 200,
             "n_burn": 0,
-            "n_keep": 200,
+            "n_keep": 100,
             "n_rot": 0,
             "n_chains": 1,
             "beta_spacing_factor": 1.15,
@@ -60,6 +80,7 @@ def test_sampling_prior(setup_data, rerun=True):
             "max_perturbations": 10,
             "proposal_distribution": "uniform",
             "hist_conv": 0.05,
+            "scale_factor": [1, 1],
         }
         # run inversion
         inversion = Inversion(
@@ -68,7 +89,6 @@ def test_sampling_prior(setup_data, rerun=True):
             **inversion_init_kwargs,
         )
         # run inversion but always accept
-
         inversion.random_walk(
             **inversion_run_kwargs,
             rotation=False,
@@ -76,16 +96,20 @@ def test_sampling_prior(setup_data, rerun=True):
             sample_prior=True,
         )
 
-    in_path = "./results/inversion/results-sample_prior.nc"
-    plot_inversion_results_param_prob(in_path)
-    plot_inversion_results_param_time(in_path)
+    if plot:
+        plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
+        plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
 
 
-def test_acceptance_rate(setup_data):
+def test_high_noise_data(rerun=False, plot=False):
+    """
+    Start at the true model for high noise case.
+    """
     # set the initial model to the true model
-    # check the percent accepted in like 100 runs
 
-    data = setup_data
+    # check that (some logL values are better than true model, most are worse)
+
+    data = setup_data(sigma_data=0.01)
 
     bounds = {
         "thickness": [0.01, 1],  # km
@@ -103,6 +127,7 @@ def test_acceptance_rate(setup_data):
 
     model = Model(**model_kwargs)
 
+    # set initial model to true model
     model.thickness = np.array([0.03])
     model.vel_s = np.array([0.4, 1.5])
     model.vel_p = np.array([1.6, 2.5])
@@ -115,6 +140,9 @@ def test_acceptance_rate(setup_data):
         data.periods, velocity_model, data.data_obs
     )
 
+    # check acceptance rate. (ratio of accepted to proposed steps)
+    # can track the average over the whole run and that of the last 1000 or 10,000 steps.
+    # expect / want an acceptance rate of ~0.3
     n_steps = 1000
     for _ in range(n_steps):
         # if using the perturb params function, it does the acceptance rate stats in the function
@@ -123,6 +151,34 @@ def test_acceptance_rate(setup_data):
     assert (model.swap_acc + model.swap_prop) == n_steps
     assert model.swap_acc > 0.1 * n_steps
     assert model.swap_prop > 0.1 * n_steps
+
+    # plotting
+    if plot:
+        # Generate a plot of data fit. That should include best fit model and a number of other fits that are also part of the sample. This is useful to look at to see if predictions are plausible.
+        pass
+
+
+def test_low_noise_data():
+    data = setup_data(sigma_data=0.01)
+    # set the initial model to the true model (?)
+    # generate low noise data set
+
+    # run inversion
+    # likely need smaller step sizes
+
+    # check that logL output is plausable compared to true logL
+    # check acceptance rate
+
+    pass
+
+
+def test_distributions():
+    # test uniform vs. cauchy?
+    # test that sampling prior goes to approximate distribution?
+    pass
+
+
+# TESTING OPTIMIZATION INVERSION
 
 
 def test_constant_temp_inversion(setup_data):
