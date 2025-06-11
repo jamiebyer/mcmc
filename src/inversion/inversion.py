@@ -402,6 +402,7 @@ class Inversion:
             # saving the chain model with beta of 1
             # *** also there are multiple chains like that. which one do i save? ***
             if chain.beta == 1:
+                # *** remove append later ***
                 # maybe move this to model class
                 # self.stored_results["params"].append(chain.model_params.copy())
                 self.stored_results["thickness"].append(chain.thickness.copy())
