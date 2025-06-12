@@ -1,9 +1,6 @@
 import numpy as np
-from disba import PhaseDispersion
 from disba._exception import DispersionError
 import pandas as pd
-from scipy import interpolate
-import matplotlib.pyplot as plt
 
 np.complex_ = np.complex64
 
@@ -13,46 +10,48 @@ class Model:
     def __init__(
         self,
         model_params,
-        nuissance_params,
-        sigma_model,
-        beta,
-        n_bins,
+        beta=None,
     ):
         """
         :param beta: inverse temperature; larger values explore less of the parameter space,
             but are more precise; between 0 and 1
-        :param n_bins: number of bins for histogram
         """
-
-        # used for computing model params
-        self.sigma_model = sigma_model
-
-        # assemble model params
-        self.n_params = len(model_params)
+        # initialize
 
         self.logL = None
         self.data_pred = None
 
+        # acceptance ratio for each parameter
+        self.swap_acc = 0
+        self.swap_rej = 0
+        self.swap_err = 0
+
         self.beta = beta
 
+        """
         # variables for storing and computing covariance matrix after burn-in
         self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
         self.n_cov = 0  # initialize the dividing number for covariance
         self.mean_model = np.zeros(self.n_params)
         self.mean_model_sum = np.zeros((self.n_params))
-
         # initialize covariance matrix
         self.cov_mat = np.zeros((self.n_params, self.n_params))
         self.cov_mat_sum = np.zeros((self.n_params, self.n_params))
-
-        # acceptance ratio for each parameter
-        self.swap_acc = 0
-        self.swap_prop = 0
-        self.swap_err = 0
-
+        
         # initialize histogram of model parameters
         self.n_bins = n_bins
         self.model_hist = np.zeros((self.n_params, n_bins + 1))
+        """
+
+    @staticmethod
+    def validate_bounds(param_bounds, model_params):
+        """
+        validate bounds.
+        """
+        valid_params = np.all(
+            (model_params >= param_bounds[0]) & (model_params <= param_bounds[1])
+        )
+        return valid_params
 
     def generate_model_params(self, param_bounds):
         """

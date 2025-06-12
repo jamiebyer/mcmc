@@ -10,6 +10,7 @@ import xarray as xr
 import os
 from inversion.model import SyntheticData, Model
 from inversion.inversion import Inversion
+from inversion.model_params import DispersionCurveParams
 
 np.random.seed(0)
 
@@ -58,41 +59,43 @@ def test_sampling_prior(rerun=True, plot=True):
         data = setup_data(sigma_data=0.01)
         bounds = {
             "thickness": [0.001, 0.1],  # km
-            "vel_p": [0.1, 6],  # km/s
+            # "vel_p": [0.1, 6],  # km/s
             "vel_s": [0.1, 1.8],  # km/s
-            "density": [0.5, 3],  # g/cm^3
+            # "density": [0.5, 3],  # g/cm^3
         }
-        model_kwargs = {
+        model_params_kwargs = {
             "n_layers": 2,
             "sigma_model": {"thickness": 0.1, "vel_s": 0.01},  # km  # km/s
-            "poisson_ratio": 0.265,
+            "param_bounds": bounds,
+            "vpvs_ratio": 0,
         }
         inversion_init_kwargs = {
-            "param_bounds": bounds,
-            "n_bins": 200,
             "n_burn": 0,
-            "n_keep": 100,
-            "n_rot": 0,
+            "n_batch": 100,
+            "n_mcmc": 10000,
             "n_chains": 1,
             "beta_spacing_factor": 1.15,
         }
         inversion_run_kwargs = {
-            "max_perturbations": 10,
             "proposal_distribution": "uniform",
-            "hist_conv": 0.05,
             "scale_factor": [1, 1],
         }
+
+        # model params
+        model_params = DispersionCurveParams(**model_params_kwargs)
+
         # run inversion
         inversion = Inversion(
             data,
-            **model_kwargs,
+            model_params,
             **inversion_init_kwargs,
         )
+
         # run inversion but always accept
         inversion.random_walk(
             **inversion_run_kwargs,
-            rotation=False,
             out_filename="sample_prior",
+            rotation=False,
             sample_prior=True,
         )
 

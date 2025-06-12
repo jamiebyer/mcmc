@@ -14,27 +14,19 @@ class Inversion:
     def __init__(
         self,
         data,
-        n_layers,
-        sigma_model,
-        poisson_ratio,
-        param_bounds,
-        n_chains,
-        beta_spacing_factor,
-        n_bins,
+        model_params,
         n_burn,
-        n_keep,
-        n_rot,
+        n_chunk,
+        n_mcmc,
+        beta_spacing_factor=None,
+        n_chains=1,
     ):
         """
         :param n_data: number of data observed.
-        :param param_bounds: min, max bounds for each model param
-        :param freqs: frequencies at which data is measured
-        :param phase_vel_obs: observed data from true model
-        :param poisson_ratio:
-        :param density_params:
-        :param n_layers: number of layers in model.
+
         :param n_chains: number of chains
         :param beta_spacing_factor:
+
         :param n_bins: number of bins for the model histograms
         :param n_burn_in: number of steps to discard from the start of the run (to avoid bias towards the starting model)
         :param n_keep: number of steps/iterations to save to file at a time. determines total number of steps.
@@ -49,34 +41,24 @@ class Inversion:
         - run with parallel tempering/ chains
         """
 
-        # setting up model
         self.data = data
-        # self.param_bounds = Model.assemble_param_bounds(param_bounds, n_layers)
-        self.param_bounds = param_bounds
 
         # parameters related to number of steps taken in random walk
-        # should function with a burn in of 0
         self.n_burn = n_burn
-        self.n_rot = n_rot
-
-        self.n_keep = n_keep
-        self.n_mcmc = 1000 * n_keep  # number of steps for the random walk
+        self.n_chunk = n_chunk
+        self.n_mcmc = n_mcmc  # number of steps for the random walk
 
         # initialize chains, generate starting params.
         self.n_chains = n_chains
         self.initialize_chains(
-            n_bins,
-            self.param_bounds,
-            n_layers,
-            sigma_model,
-            poisson_ratio,
+            model_params,
             beta_spacing_factor,
         )
 
         # set initial likelihood ***
 
-        # parameters for saving data
-        self.n_bins = n_bins
+        # make it a dataset from the beginning?
+        # allocate space from the start
         self.stored_results = {
             "thickness": [],
             "vel_s": [],
@@ -85,9 +67,6 @@ class Inversion:
             "data_pred": [],
             "logL": [],
             "beta": [],
-            # "rot_mat": [],
-            # "sigma_model": [],
-            # "hist_diff": [],
             "acc_rate": [],
             "err_ratio": [],
         }
@@ -120,21 +99,13 @@ class Inversion:
 
     def initialize_chains(
         self,
-        n_bins,
-        param_bounds,
-        n_layers,
-        sigma_model,
-        poisson_ratio,
+        model_params,
         beta_spacing_factor,
         optimize_starting_model=False,
     ):
         """
         initialize each of the chains, setting starting parameters, beta values, initial rotation params
 
-        :param n_bins: number of bins for histogram of results
-        :param param_bounds: bounds for the model params (min, max, range)
-        :param poisson_ratio: value for poisson's ratio to pass to the chain model
-        :param density_params: birch's parameters to pass to the chain model
         :param beta_spacing_factor
         """
 
@@ -143,44 +114,35 @@ class Inversion:
         chains = []
         for ind in range(self.n_chains):
             model = Model(
-                n_layers,
-                poisson_ratio,
-                sigma_model,
+                model_params.copy(),
                 betas[ind],
-                n_bins,
             )
-            # sample
+
+            # initialize model params
             valid_params = False
             while not valid_params:
-                thickness = np.random.uniform(
-                    self.param_bounds["thickness"][0],
-                    self.param_bounds["thickness"][1],
-                    (n_layers - 1),
-                )
-                vel_s = np.random.uniform(
-                    self.param_bounds["vel_s"][0],
-                    self.param_bounds["vel_s"][1],
-                    n_layers,
+                # generate model params between bounds.
+                test_params = np.random.uniform(
+                    low=model.model_params.param_bounds[0],
+                    high=model.model_params.param_bounds[1],
+                    size=model.model_params.n_model_params,
                 )
 
-                velocity_model, valid_params = model.get_velocity_model(
-                    param_bounds, thickness, vel_s
-                )
-                # set initial likelihood
+                velocity_model = model.model_params.get_velocity_model(test_params)
+
                 try:
-                    model.logL, model.data_pred = model.get_likelihood(
-                        velocity_model, self.data
-                    )
+                    logL, data_pred = model.get_likelihood(velocity_model, self.data)
                 except (DispersionError, ZeroDivisionError) as _:
                     valid_params = False
 
-            model.thickness = thickness
-            model.vel_s = vel_s
+            model.logL = logL
+            model.data_pred = data_pred
+            model.model_params.model_params = test_params
 
             # get initial model
-            if optimize_starting_model:
-                model_params = model.get_optimization_model(param_bounds, self.data)
-                model.model_params = model_params
+            # if optimize_starting_model:
+            #    model_params = model.get_optimization_model(param_bounds, self.data)
+            #    model.model_params = model_params
 
             chains.append(model)
 
@@ -189,9 +151,7 @@ class Inversion:
     # async def random_walk(
     def random_walk(
         self,
-        max_perturbations,
         proposal_distribution,
-        hist_conv,
         scale_factor=[1, 1],
         save_burn_in=True,
         rotation=False,
@@ -215,13 +175,11 @@ class Inversion:
         for n_steps in range(self.n_mcmc):
             burn_in = n_steps < self.n_burn
             # save burn in: whether or not to save samples from burn in stage
-            # (diff file?, labeled?)
-            # how often is the rotation matrix updated? n_rot?
+            # (labeled?)
 
             # checking whether to write samples
             # check if saving burn in, check if there is a chunk of n_keep samples to
 
-            # parallel computing
             delayed_results = []
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
@@ -236,18 +194,14 @@ class Inversion:
                     max_perturbations,
                 )
                 """
-                updated_model = self.perform_step(
-                    chain_model,
-                    max_perturbations,
+                chain_model.perturb_params(
+                    self.data,
                     proposal_distribution,
                     scale_factor=scale_factor,
                     sample_prior=sample_prior,
                 )
-                # update model param hist
-                # add back in later
-                # chain_model.update_model_hist()
 
-                delayed_results.append(updated_model)
+                delayed_results.append(chain_model)
                 # delayed_results.append(updated_model)
 
             # synchronizing the separate chains
@@ -258,134 +212,23 @@ class Inversion:
                 # tempering exchange move
                 self.perform_tempering_swap()
 
-            # if it converges, need to save final samples
-
             # check convergence using model param hist
-            # add back later ***
-            # hist_diff = self.check_convergence(n_steps, hist_conv, out_dir)
-            hist_diff = 0.5
-            # saving sample and write to file
+            # *** add back later ***
 
-            # save n_keep samples at a time
+            # saving sample and write to file
+            # save n_chunk samples at a time
             if save_burn_in:
-                write_samples = (n_steps + 1 >= self.n_keep) and (
-                    (np.mod(n_steps + 1, self.n_keep)) == 0
+                write_samples = (n_steps + 1 >= self.n_chunk) and (
+                    (np.mod(n_steps + 1, self.n_chunk)) == 0
                 )
             else:
                 # save samples past burn-in
-                write_samples = not burn_in and (np.mod(n_steps + 1, self.n_keep)) == 0
+                write_samples = not burn_in and (np.mod(n_steps + 1, self.n_chunk)) == 0
 
             # store every sample; only write to file every n_keep samples.
-            self.store_samples(hist_diff, n_steps, self.n_keep, out_dir, write_samples)
-            # hist_diff, n_step, n_samples, out_dir, write_samples
+            self.store_samples(n_steps, self.n_chunk, out_dir, write_samples)
 
-    # async def perform_step(
-    def perform_step(
-        self,
-        chain_model,
-        max_perturbations,
-        proposal_distribution,
-        scale_factor,
-        sample_prior=False,
-    ):
-        """
-        update one chain model.
-        perturb each param on the chain model and accept each new model with a likelihood.
-        """
-        # *** what kind of random distribution should this be, and should there be a lower bound...? ***
-        # n_perturbations = int(np.random.uniform(max_perturbations))
-        n_perturbations = 1
-        for _ in range(n_perturbations):
-            # evolve model forward by perturbing each parameter and accepting/rejecting new model based on MH criteria
-            chain_model.perturb_params(
-                self.param_bounds,
-                self.data,
-                proposal_distribution,
-                scale_factor=scale_factor,
-                sample_prior=sample_prior,
-            )
-
-        return chain_model
-
-    def perform_tempering_swap(self):
-        """
-        *** fix up later ***
-        """
-        # tempering exchange move
-        # following: https://www.cs.ubc.ca/~nando/540b-2011/projects/8.pdf
-
-        for ind in range(self.n_chains - 1):
-            # swap temperature neighbours with probability
-            # look to see if there's a better way to do more than 2 chains!
-
-            # At a given Monte Carlo step we can update the global system by swapping the
-            # configuration of the two systems, or alternatively trading the two temperatures.
-            # The update is accepted according to the Metropolis–Hastings criterion with probability
-            beta_1 = self.chains[ind].beta
-            beta_2 = self.chains[ind + 1].beta
-
-            if beta_1 != beta_2:
-                beta_ratio = beta_2 - beta_1
-
-                logL_1 = self.chains[ind].logL
-                logL_2 = self.chains[ind + 1].logL
-
-                logratio = beta_ratio * (logL_1 - logL_2)
-                xi = np.random.rand(1)
-                # *** overflow in exp ***
-                if xi <= np.exp(logratio):
-                    # ACCEPT SWAP
-                    # swap temperatures and order in list of chains? chains should be ordered by temp
-
-                    if beta_1 == 1 or beta_2 == 1:
-                        self.swap_acc += 1
-
-                # *** swap_tot and swapacc are for calculating swap rate.... ***
-                # if beta is 1, this is the master chain?
-                if beta_1 == 1 or beta_2 == 1:
-                    self.swap_prop += 1
-
-    def check_convergence(self, n_step, hist_conv, out_dir):
-        """
-        check if the model has converged.
-
-        :param n_step: number of mcmc steps that have happened.
-        :hist_conv: value determining model convergence.
-        :out_dir: path for where to save results.
-        """
-        # do at least n_rot steps after starting rotation before model can converge
-        enough_rotations = n_step > (self.n_burn + self.n_rot)
-
-        """
-        Check convergence for one chain, and for any number.
-        """
-
-        # *** validate. i think this is finding convergence for 2 chains. i want to generalize this. ***
-        # find the max of abs of the difference between 2 models, right now hard-coded for 2 chains
-        hist_diff = (
-            np.abs(
-                self.chains[0].model_hist / self.chains[0].model_hist.max()
-                - self.chains[1].model_hist / self.chains[1].model_hist.max()
-            )
-        ).max()
-
-        if (hist_diff < hist_conv) & enough_rotations:
-            # store the samples up to the convergence.
-            n_samples = (n_step - self.n_burn) % self.n_keep
-            self.store_samples(
-                hist_diff,
-                n_step,
-                n_samples,
-                out_dir,
-                write_samples=True,
-            )
-
-            # model has converged.
-            sys.exit("Converged, terminate.")
-
-        return hist_diff
-
-    def store_samples(self, hist_diff, n_step, n_samples, out_dir, write_samples=True):
+    def store_samples(self, n_step, n_samples, out_dir, write_samples):
         """
         write out to .zarr in chunks of size n_keep.
 
@@ -535,3 +378,81 @@ class Inversion:
                 "acc_rate": [],
                 "err_ratio": [],
             }
+
+    def perform_tempering_swap(self):
+        """
+        *** fix up later ***
+        """
+        # tempering exchange move
+        # following: https://www.cs.ubc.ca/~nando/540b-2011/projects/8.pdf
+
+        for ind in range(self.n_chains - 1):
+            # swap temperature neighbours with probability
+            # look to see if there's a better way to do more than 2 chains!
+
+            # At a given Monte Carlo step we can update the global system by swapping the
+            # configuration of the two systems, or alternatively trading the two temperatures.
+            # The update is accepted according to the Metropolis–Hastings criterion with probability
+            beta_1 = self.chains[ind].beta
+            beta_2 = self.chains[ind + 1].beta
+
+            if beta_1 != beta_2:
+                beta_ratio = beta_2 - beta_1
+
+                logL_1 = self.chains[ind].logL
+                logL_2 = self.chains[ind + 1].logL
+
+                logratio = beta_ratio * (logL_1 - logL_2)
+                xi = np.random.rand(1)
+                # *** overflow in exp ***
+                if xi <= np.exp(logratio):
+                    # ACCEPT SWAP
+                    # swap temperatures and order in list of chains? chains should be ordered by temp
+
+                    if beta_1 == 1 or beta_2 == 1:
+                        self.swap_acc += 1
+
+                # *** swap_tot and swapacc are for calculating swap rate.... ***
+                # if beta is 1, this is the master chain?
+                if beta_1 == 1 or beta_2 == 1:
+                    self.swap_prop += 1
+
+    def check_convergence(self, n_step, hist_conv, out_dir):
+        """
+        check if the model has converged.
+
+        :param n_step: number of mcmc steps that have happened.
+        :hist_conv: value determining model convergence.
+        :out_dir: path for where to save results.
+        """
+        # do at least n_rot steps after starting rotation before model can converge
+        enough_rotations = n_step > (self.n_burn + self.n_rot)
+
+        """
+        Check convergence for one chain, and for any number.
+        """
+
+        # *** validate. i think this is finding convergence for 2 chains. i want to generalize this. ***
+        # find the max of abs of the difference between 2 models, right now hard-coded for 2 chains
+        hist_diff = (
+            np.abs(
+                self.chains[0].model_hist / self.chains[0].model_hist.max()
+                - self.chains[1].model_hist / self.chains[1].model_hist.max()
+            )
+        ).max()
+
+        if (hist_diff < hist_conv) & enough_rotations:
+            # store the samples up to the convergence.
+            n_samples = (n_step - self.n_burn) % self.n_keep
+            self.store_samples(
+                hist_diff,
+                n_step,
+                n_samples,
+                out_dir,
+                write_samples=True,
+            )
+
+            # model has converged.
+            sys.exit("Converged, terminate.")
+
+        return hist_diff
