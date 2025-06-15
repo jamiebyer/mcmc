@@ -22,15 +22,12 @@ class ModelParams:
 
 class DispersionCurveParams(ModelParams):
 
-    def __init__(self, n_layers, param_bounds, vpvs_ratio):
+    def __init__(self, n_layers, param_bounds, sigma_model, vpvs_ratio):
         # initialize params
         self.n_layers = n_layers
         self.vpvs_ratio = vpvs_ratio
-
-        # assemble param bounds
-        self.param_bounds = DispersionCurveParams.assemble_param_bounds(
-            param_bounds, self.n_layers
-        )
+        self.param_bounds = param_bounds
+        self.sigma_model = sigma_model
 
         # get number of parameters
         self.n_model_params = (2 * self.n_layers) + 1
@@ -40,11 +37,26 @@ class DispersionCurveParams(ModelParams):
         self.nuissance_params = np.empty(self.n_nuissance_params)
 
         # model parameter inds
-        self.thickness_inds = np.arange(self.n_layers - 1)
-        self.vel_s_inds = np.arange(self.n_layers, 2 * self.n_layers)
+        self.thickness_inds = np.arange(self.n_layers)
+        self.vel_s_inds = np.arange(self.n_layers, 2 * self.n_layers + 1)
         # nuissance parameter inds
         self.vel_p_inds = np.arange(self.n_nuissance_params)
         self.density = np.arange(self.n_nuissance_params, 2 * self.n_nuissance_params)
+
+        # used by inversion to define dataset for storing parameters
+        # for defining the dataset, need the names and size of the params
+        # and with inds
+        # with this, are the inds needed anywhere else?
+        self.params_info = {
+            "thickness": {
+                "n_params": n_layers,
+                "inds": self.thickness_inds,
+            },
+            "vel_s": {
+                "n_params": n_layers + 1,
+                "inds": self.vel_s_inds,
+            },
+        }
 
     # functions to compute nuissance params from model params
     def get_vel_p(self, vel_s):
@@ -56,20 +68,12 @@ class DispersionCurveParams(ModelParams):
         density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
         return density
 
-    def assemble_sigma_model():
-        """
-        from sigma for each param.
-        (can probably generalize)
-        """
-        pass
-
-    @staticmethod
-    def assemble_param_bounds(bounds, n_layers):
+    def assemble_param_bounds(self):
         # reshape bounds to be the same shape as params
         param_bounds = np.concatenate(
             (
-                [bounds["thickness"]] * (n_layers - 1),
-                [bounds["vel_s"]] * n_layers,
+                [self.param_bounds["thickness"]] * self.n_layers,
+                [self.param_bounds["vel_s"]] * (self.n_layers + 1),
             ),
             axis=0,
         )
@@ -79,6 +83,20 @@ class DispersionCurveParams(ModelParams):
         param_bounds = np.column_stack((param_bounds, range))
 
         return param_bounds
+
+    def assemble_sigma_model(self):
+        """
+        from sigma for each param.
+        """
+        sigma_model = np.concatenate(
+            (
+                [self.sigma_model["thickness"]] * self.n_layers,
+                [self.sigma_model["vel_s"]] * (self.n_layers + 1),
+            ),
+            axis=0,
+        )
+
+        return sigma_model
 
     def get_velocity_model(self, model_params):
         """
@@ -116,19 +134,10 @@ class DispersionCurveParams(ModelParams):
 
             return phase_velocity
         except (DispersionError, ZeroDivisionError) as e:
-            # *** errors: ***
             # *** track the type of error ***
             # failed to find root for fundamental mode
             # division by zero
             raise e
-
-    def store_params(self):
-        # or just update stored results on ModelParams
-        output_params = (
-            self.model_params[self.thickness_inds],
-            self.model_params[self.vel_s_inds],
-        )
-        return output_params
 
 
 class EllipticityParams(ModelParams):

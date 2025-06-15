@@ -8,15 +8,14 @@ from plotting.plot_inversion import (
 import matplotlib.pyplot as plt
 import xarray as xr
 import os
-from inversion.model import SyntheticData, Model
+from inversion.data import SyntheticData
+from inversion.model import Model
 from inversion.inversion import Inversion
 from inversion.model_params import DispersionCurveParams
 
 np.random.seed(0)
 
 
-# @pytest.mark.usefixtures("data", "model")
-# @pytest.fixture
 def setup_data(sigma_data):
     n_data = 50
     periods = np.flip(1 / np.logspace(0, 1.1, n_data))
@@ -59,20 +58,18 @@ def test_sampling_prior(rerun=True, plot=True):
         data = setup_data(sigma_data=0.01)
         bounds = {
             "thickness": [0.001, 0.1],  # km
-            # "vel_p": [0.1, 6],  # km/s
             "vel_s": [0.1, 1.8],  # km/s
-            # "density": [0.5, 3],  # g/cm^3
         }
         model_params_kwargs = {
-            "n_layers": 2,
+            "n_layers": 1,
             "sigma_model": {"thickness": 0.1, "vel_s": 0.01},  # km  # km/s
+            "vpvs_ratio": 1.75,
             "param_bounds": bounds,
-            "vpvs_ratio": 0,
         }
         inversion_init_kwargs = {
             "n_burn": 0,
-            "n_batch": 100,
-            "n_mcmc": 10000,
+            "n_chunk": 100,
+            "n_mcmc": 1000,
             "n_chains": 1,
             "beta_spacing_factor": 1.15,
         }
@@ -93,6 +90,7 @@ def test_sampling_prior(rerun=True, plot=True):
 
         # run inversion but always accept
         inversion.random_walk(
+            model_params,
             **inversion_run_kwargs,
             out_filename="sample_prior",
             rotation=False,
