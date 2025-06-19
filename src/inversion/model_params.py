@@ -41,7 +41,9 @@ class DispersionCurveParams(ModelParams):
         self.vel_s_inds = np.arange(self.n_layers, 2 * self.n_layers + 1)
         # nuissance parameter inds
         self.vel_p_inds = np.arange(self.n_nuissance_params)
-        self.density = np.arange(self.n_nuissance_params, 2 * self.n_nuissance_params)
+        self.density_inds = np.arange(
+            self.n_nuissance_params, 2 * self.n_nuissance_params
+        )
 
         # used by inversion to define dataset for storing parameters
         # for defining the dataset, need the names and size of the params
@@ -61,11 +63,13 @@ class DispersionCurveParams(ModelParams):
     # functions to compute nuissance params from model params
     def get_vel_p(self, vel_s):
         vel_p = vel_s * self.vpvs_ratio
+        vel_p = np.array([1.6, 2.5])
         return vel_p
 
     def get_density(self, vel_p):
         # using Garner's relation
         density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
+        density = np.array([2.0, 2.5])
         return density
 
     def assemble_param_bounds(self):
@@ -109,6 +113,7 @@ class DispersionCurveParams(ModelParams):
         vel_p = self.get_vel_p(vel_s)
         density = self.get_density(vel_p)
 
+        # *** pre-allocate space here ***
         velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
 
         return velocity_model

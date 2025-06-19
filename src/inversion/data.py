@@ -18,7 +18,7 @@ class Data:
         if isinstance(sigma_data, list) and len(sigma_data) == self.n_data:
             self.data_cov = np.diag(sigma_data**2)
         elif isinstance(sigma_data, float):
-            self.data_cov = np.eye(self.n_data) * sigma_data
+            self.data_cov = np.eye(self.n_data) * sigma_data**2
 
 
 class FieldData(Data):

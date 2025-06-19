@@ -61,9 +61,27 @@ class Inversion:
         # loop over params in dict, and add with appropriate dimensions
 
     def define_dataset(self, model_params, out_dir):
+        # write empty dataset to file, with coord for n_data
+        coords = {
+            "n_data": np.arange(self.data.n_data),
+            "step": np.array([]),
+        }
+        ds = xr.Dataset(coords=coords)
+
+        # if the output folder doesn't exist, create it.
+        path_dir = os.path.dirname(out_dir)
+        if not os.path.isdir(path_dir):
+            os.mkdir(path_dir)
+
+        # saved dataset should just have parameter names, dimensions, and constants
+        if not os.path.isfile(out_dir):
+            # ds_results.to_zarr(out_dir)
+            ds.to_netcdf(out_dir)
+
+        # create dataset for storing chunk on self.
+
         # general params
         data_vars = {
-            "data_obs": self.data.data_obs,
             "data_pred": (
                 ["step", "n_data"],
                 np.empty((self.n_chunk, self.data.n_data)),
@@ -81,17 +99,15 @@ class Inversion:
 
         # step values depend on the current step, since it appends existing dataset
         # every time a chunk is saved, add to step in storage ds?
-        coords = {
-            "n_data": np.arange(self.data.n_data),
-            "step": np.arange(self.n_chunk),
-        }
+
+        coords["step"] = np.arange(self.n_chunk)
+
         self.ds_storage = xr.Dataset(data_vars=data_vars, coords=coords)
 
         # loop over model params to add parameters to data_vars and coords
-        # data_vars = {}
         for key, val in model_params.params_info.items():
             self.ds_storage = self.ds_storage.assign_coords(
-                {"n" + key: np.arange(val["n_params"])}
+                {"n_" + key: np.arange(val["n_params"])}
             )
             self.ds_storage = self.ds_storage.assign(
                 {
@@ -101,16 +117,6 @@ class Inversion:
                     )
                 }
             )
-
-        # if the output folder doesn't exist, create it.
-        path_dir = os.path.dirname(out_dir)
-        if not os.path.isdir(path_dir):
-            os.mkdir(path_dir)
-
-        # if this is the first iteration, create a file to save ds_results. otherwise append the results.
-        if not os.path.isfile(out_dir):
-            # ds_results.to_zarr(out_dir)
-            self.ds_storage.to_netcdf(out_dir)
 
     def get_betas(self, beta_spacing_factor):
         """
@@ -164,8 +170,8 @@ class Inversion:
             while not valid_params:
                 # generate model params between bounds.
                 test_params = np.random.uniform(
-                    low=model.param_bounds[0],
-                    high=model.param_bounds[1],
+                    low=model.param_bounds[:, 0],
+                    high=model.param_bounds[:, 1],
                     size=model.model_params.n_model_params,
                 )
 
@@ -313,6 +319,7 @@ class Inversion:
             # *** change later to use context manager ***
             ds_full = xr.open_dataset(out_dir).load()
             ds_full.close()
+            # append along diff values for step
             ds = xr.concat([ds_full, self.ds_storage], dim="step")
             ds.to_netcdf(out_dir)  # , append_dim="step")
 

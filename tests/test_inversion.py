@@ -27,6 +27,10 @@ def setup_data(sigma_data):
     }
 
     data = SyntheticData(periods, sigma_data, **data_kwargs)
+    # plt.plot(data.periods, data.data_true, "-b")
+    # plt.plot(data.periods, data.data_obs, "x")
+    # plt.show()
+
     return data
 
 
@@ -43,7 +47,25 @@ def test_acceptance_criteria():
     pass
 
 
-def test_sampling_prior(rerun=True, plot=True):
+def test_sampling_prior(rerun=False, plot=True):
+    """
+    run tests for:
+    - sample prior; uniform
+    - sample prior; cauchy
+    - start from true; low noise
+    - start from true; high noise
+    - generate true model; low noise
+    - generate true model; high noise
+    """
+    sample_prior = False
+    proposal_distribution = "cauchy"
+    set_starting_model = True
+    noise = 0.1
+    sigma_model = {
+        "thickness": 0.1,
+        "vel_s": 0.1,
+    }  # fractional step size (multiplied by param bounds width)
+
     in_path = "./results/inversion/results-sample_prior.nc"
     # likelihood always returns 1
     if rerun:
@@ -55,26 +77,26 @@ def test_sampling_prior(rerun=True, plot=True):
             os.remove(in_path)
 
         # set up data and inversion params
-        data = setup_data(sigma_data=0.01)
+        data = setup_data(sigma_data=noise)
         bounds = {
             "thickness": [0.001, 0.1],  # km
             "vel_s": [0.1, 1.8],  # km/s
         }
         model_params_kwargs = {
             "n_layers": 1,
-            "sigma_model": {"thickness": 0.1, "vel_s": 0.01},  # km  # km/s
+            "sigma_model": sigma_model,
             "vpvs_ratio": 1.75,
             "param_bounds": bounds,
         }
         inversion_init_kwargs = {
             "n_burn": 0,
-            "n_chunk": 100,
-            "n_mcmc": 1000,
+            "n_chunk": 500,
+            "n_mcmc": 10000,
             "n_chains": 1,
             "beta_spacing_factor": 1.15,
         }
         inversion_run_kwargs = {
-            "proposal_distribution": "uniform",
+            "proposal_distribution": proposal_distribution,
             "scale_factor": [1, 1],
         }
 
@@ -88,13 +110,95 @@ def test_sampling_prior(rerun=True, plot=True):
             **inversion_init_kwargs,
         )
 
+        if set_starting_model:
+            # set initial model to true model
+            model = inversion.chains[0]
+            test_model_params = np.array([0.03, 0.4, 1.5])
+            velocity_model = model.model_params.get_velocity_model(test_model_params)
+            model.model_params.model_params = test_model_params
+
+            # set initial likelihood
+            model.logL, model.data_pred = model.get_likelihood(velocity_model, data)
+
         # run inversion but always accept
         inversion.random_walk(
             model_params,
             **inversion_run_kwargs,
             out_filename="sample_prior",
             rotation=False,
-            sample_prior=True,
+            sample_prior=sample_prior,
+        )
+
+    # assert, all model params should be in bounds
+
+    if plot:
+        plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
+        plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
+
+
+def test_low_noise_data(rerun=True, plot=True):
+    in_path = "./results/inversion/results-test_low_noise.nc"
+    # likelihood always returns 1
+    if rerun:
+        # deleting test file if it exists
+        if os.path.isfile(in_path):
+            # *** make sure .nc is written in a context manager by the end
+            f = open(in_path, "r")
+            f.close()
+            os.remove(in_path)
+
+        # set up data and inversion params
+        # data = setup_data(sigma_data=0.01)
+        data = setup_data(sigma_data=0.1)
+        bounds = {
+            "thickness": [0.001, 0.1],  # km
+            "vel_s": [0.1, 1.8],  # km/s
+        }
+        model_params_kwargs = {
+            "n_layers": 1,
+            # "sigma_model": {"thickness": 0.1, "vel_s": 0.01},  # km  # km/s
+            "sigma_model": {"thickness": 1, "vel_s": 1},  # km  # km/s
+            "vpvs_ratio": 1.75,
+            "param_bounds": bounds,
+        }
+        inversion_init_kwargs = {
+            "n_burn": 0,
+            "n_chunk": 500,
+            "n_mcmc": 10000,
+            "n_chains": 1,
+            "beta_spacing_factor": 1.15,
+        }
+        inversion_run_kwargs = {
+            # "proposal_distribution": "uniform",
+            "proposal_distribution": "cauchy",
+            "scale_factor": [1, 1],
+        }
+
+        # model params
+        model_params = DispersionCurveParams(**model_params_kwargs)
+
+        # run inversion
+        inversion = Inversion(
+            data,
+            model_params,
+            **inversion_init_kwargs,
+        )
+
+        """
+        # set initial model to true model
+        model = inversion.chains[0]
+        test_model_params = np.array([0.03, 0.4, 1.5])
+        velocity_model = model.model_params.get_velocity_model(test_model_params)
+        model.model_params.model_params = test_model_params
+
+        # set initial likelihood
+        model.logL, model.data_pred = model.get_likelihood(velocity_model, data)
+        """
+        # run inversion but always accept
+        inversion.random_walk(
+            model_params,
+            **inversion_run_kwargs,
+            out_filename="test_low_noise",
         )
 
     if plot:
@@ -157,20 +261,6 @@ def test_high_noise_data(rerun=False, plot=False):
     if plot:
         # Generate a plot of data fit. That should include best fit model and a number of other fits that are also part of the sample. This is useful to look at to see if predictions are plausible.
         pass
-
-
-def test_low_noise_data():
-    data = setup_data(sigma_data=0.01)
-    # set the initial model to the true model (?)
-    # generate low noise data set
-
-    # run inversion
-    # likely need smaller step sizes
-
-    # check that logL output is plausable compared to true logL
-    # check acceptance rate
-
-    pass
 
 
 def test_distributions():

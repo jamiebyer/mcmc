@@ -49,13 +49,14 @@ class Model:
         self.model_hist = np.zeros((self.n_params, n_bins + 1))
         """
 
-    def validate_bounds(self, model_params):
+    def validate_bounds(self, model_params, ind):
         """
         validate bounds.
         """
+        # technically only need to validate one changed ind
         valid_params = np.all(
-            (model_params >= self.param_bounds[0])
-            & (model_params <= self.param_bounds[1])
+            all(model_params >= self.param_bounds[:, 0])
+            & all(model_params <= self.param_bounds[:, 1])
         )
         return valid_params
 
@@ -168,20 +169,23 @@ class Model:
 
         # uniform distribution
         if proposal_distribution == "uniform":
-            test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform() * (
-                self.param_bounds[ind][1] - self.param_bounds[ind][0]
+            test_model_params[ind] = (
+                self.param_bounds[ind][0]
+                + np.random.uniform() * self.param_bounds[ind][2]
             )
         elif proposal_distribution == "cauchy":
             # cauchy distribution
-            test_model_params[ind] += self.sigma_model[ind] * np.tan(
-                np.pi * (np.random.uniform() - 0.5)
+            test_model_params[ind] += (
+                self.sigma_model[ind]
+                * self.param_bounds[ind][2]
+                * np.tan(np.pi * (np.random.uniform() - 0.5))
             )
 
         # assemble test params and check bounds
         test_model = self.model_params.get_velocity_model(test_model_params)
 
         # check bounds
-        valid_params = self.validate_bounds(test_model_params)
+        valid_params = self.validate_bounds(test_model_params, ind)
 
         if valid_params:
             # check acceptance criteria
@@ -191,6 +195,8 @@ class Model:
             if acc:
                 self.model_params.model_params = test_model_params.copy()
                 self.swap_acc += 1
+            else:
+                self.swap_rej += 1
         else:
             self.swap_rej += 1
 
@@ -212,8 +218,8 @@ class Model:
         dlogL = dlogL / T
 
         # Apply MH criterion (accept/reject)
-        xi = np.random.uniform(1)
-        if xi <= np.exp(-dlogL):
+        xi = np.random.uniform()  # between 0 and 1
+        if xi <= np.exp(dlogL):
             self.logL = logL_new
             self.data_pred = data_pred_new
             return True
@@ -233,8 +239,8 @@ class Model:
 
             cov_inv = data.data_cov
             cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
-
-            logL = residuals.T @ cov_inv @ residuals
+            logL = -np.sum(residuals**2) / (2 * 0.1**2)
+            # logL = residuals.T @ cov_inv @ residuals
 
             return logL, data_pred
 
