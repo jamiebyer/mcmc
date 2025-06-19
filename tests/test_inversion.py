@@ -13,6 +13,9 @@ from inversion.model import Model
 from inversion.inversion import Inversion
 from inversion.model_params import DispersionCurveParams
 
+import cProfile
+from pstats import Stats, SortKey
+
 np.random.seed(0)
 
 
@@ -47,7 +50,7 @@ def test_acceptance_criteria():
     pass
 
 
-def test_sampling_prior(rerun=False, plot=True):
+def test_sampling_prior(rerun=True, plot=False, profiling=True):
     """
     run tests for:
     - sample prior; uniform
@@ -130,7 +133,6 @@ def test_sampling_prior(rerun=False, plot=True):
         )
 
     # assert, all model params should be in bounds
-
     if plot:
         plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
         plot_inversion_results_param_time(in_path)  # , skip_inds=500000)

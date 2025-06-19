@@ -288,6 +288,9 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
 
 
 def plot_inversion_results_param_prob(in_path, skip_inds=0):
+    """
+    for the histogram, show predicted model visually.
+    """
     ds = xr.open_dataset(in_path)
 
     m = [0.03] + [0.4, 1.5] + [1.6, 2.5] + [2.0, 2.5]
@@ -330,6 +333,7 @@ def plot_pred_vs_obs(in_path):
     """
     save data separately? in a separate .nc with true data if applicable.
     then the predicted model is read in from the inversion
+    should the predicted model be saved directly, or computed from final model.
     """
     ds = xr.open_dataset(in_path)
 
