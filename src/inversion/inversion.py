@@ -9,6 +9,7 @@ import os
 import xarray as xr
 import time
 from copy import deepcopy
+import dask.dataframe as dd
 
 
 class Inversion:
@@ -68,6 +69,9 @@ class Inversion:
         }
         ds = xr.Dataset(coords=coords)
 
+        for key, val in model_params.params_info.items():
+            ds = ds.assign({key + "_inds": val["inds"]})
+
         # if the output folder doesn't exist, create it.
         path_dir = os.path.dirname(out_dir)
         if not os.path.isdir(path_dir):
@@ -78,45 +82,25 @@ class Inversion:
             # ds_results.to_zarr(out_dir)
             ds.to_netcdf(out_dir)
 
-        # create dataset for storing chunk on self.
-
-        # general params
-        data_vars = {
-            "data_pred": (
-                ["step", "n_data"],
-                np.empty((self.n_chunk, self.data.n_data)),
-            ),
-            "logL": (["step"], np.empty(self.n_chunk)),
-            "acc_rate": (
-                ["step"],
-                np.empty(self.n_chunk),
-            ),
-            "err_ratio": (
-                ["step"],
-                np.empty(self.n_chunk),
-            ),
+        self.ds_storage = {
+            "coords": {
+                "n_data": {"dims": "n_data", "data": np.arange(self.data.n_data)},
+                "step": {"dims": "step", "data": np.arange(self.n_chunk)},
+                "n_model_params": {
+                    "dims": "n_model_params",
+                    "data": np.arange(model_params.n_model_params),
+                },
+            },
+            "data_vars": {
+                "model_params": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "logL": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+                "acc_rate": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+                "err_ratio": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+            },
         }
-
-        # step values depend on the current step, since it appends existing dataset
-        # every time a chunk is saved, add to step in storage ds?
-
-        coords["step"] = np.arange(self.n_chunk)
-
-        self.ds_storage = xr.Dataset(data_vars=data_vars, coords=coords)
-
-        # loop over model params to add parameters to data_vars and coords
-        for key, val in model_params.params_info.items():
-            self.ds_storage = self.ds_storage.assign_coords(
-                {"n_" + key: np.arange(val["n_params"])}
-            )
-            self.ds_storage = self.ds_storage.assign(
-                {
-                    key: (
-                        ["step", "n_" + key],
-                        np.empty((self.n_chunk, val["n_params"])),
-                    )
-                }
-            )
 
     def get_betas(self, beta_spacing_factor):
         """
@@ -256,19 +240,13 @@ class Inversion:
             # *** add back later ***
 
             # saving sample and write to file
-            # save n_chunk samples at a time
-            if save_burn_in:
-                write_samples = (n_steps + 1 >= self.n_chunk) and (
-                    (np.mod(n_steps + 1, self.n_chunk)) == 0
-                )
-            else:
-                # save samples past burn-in
-                write_samples = not burn_in and (np.mod(n_steps + 1, self.n_chunk)) == 0
 
             # store every sample; only write to file every n_chunk samples.
-            self.store_samples(n_steps, self.n_chunk, out_dir, write_samples)
+            self.store_samples(n_steps, self.n_chunk)
 
-    def store_samples(self, n_step, n_samples, out_dir, write_samples):
+            self.write_samples(save_burn_in, n_steps, burn_in, out_dir)
+
+    def store_samples(self, n_step, n_samples):
         """
         write out to .zarr in chunks of size n_keep.
 
@@ -287,55 +265,76 @@ class Inversion:
                 # update storage dataset with new param values
                 # need to loop over variables for names and inds
                 # *** alternatively, save model params and split to specific variables when writing to file. ***
-                for key, val in chain.model_params.params_info.items():
-                    # index for param and step
-                    self.ds_storage[key][{"step": n_save}] = (
-                        chain.model_params.model_params[val["inds"]]
-                    )
+                self.ds_storage["data_vars"]["model_params"]["data"][
+                    :, n_save
+                ] = chain.model_params.model_params.copy()
 
-                # *** remove append later ***
-                self.ds_storage["logL"][{"step": n_save}] = chain.logL
-                self.ds_storage["data_pred"][{"step": n_save}] = chain.data_pred.copy()
+                # a = self.ds_storage.loc[["logL", "acc_rate"]][{"step": n_save}]
+                self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
+                # self.ds_storage["data_pred"][n_save] = chain.data_pred.copy()
                 # self.ds_storage["beta"][{"step": n_step}] = chain.beta
 
                 if chain.swap_acc == 0:
-                    self.ds_storage["acc_rate"][{"step": n_save}] = 0
+                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = 0
                 else:
-                    self.ds_storage["acc_rate"][{"step": n_save}] = chain.swap_acc / (
-                        chain.swap_acc + chain.swap_rej
+                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
+                        chain.swap_acc / (chain.swap_acc + chain.swap_rej)
                     )
 
                 if chain.swap_rej == 0:
-                    self.ds_storage["err_ratio"][{"step": n_save}] = 0
+                    self.ds_storage["data_vars"]["err_ratio"]["data"][n_save] = 0
                 else:
-                    self.ds_storage["err_ratio"][{"step": n_save}] = (
+                    self.ds_storage["data_vars"]["err_ratio"]["data"][n_save] = (
                         chain.swap_err / chain.swap_rej
                     )
 
-        if write_samples:
-            """
-            append current samples to file
-            """
-            # *** change later to use context manager ***
-            ds_full = xr.open_dataset(out_dir).load()
-            ds_full.close()
-            # append along diff values for step
-            ds = xr.concat([ds_full, self.ds_storage], dim="step")
+    def write_samples(self, save_burn_in, n_steps, burn_in, out_dir):
+        """
+        append current samples to file
+
+        currently opening file, concatenating, and closing.
+        netcdf cannot append along a dimension currently...
+        zarr has an issue with the compression when saving...
+        later could save each chunk in an individual file and concat at the end...
+        """
+        # save n_chunk samples at a time
+        if save_burn_in:
+            write_samples = (n_steps + 1 >= self.n_chunk) and (
+                (np.mod(n_steps + 1, self.n_chunk)) == 0
+            )
+        else:
+            # save samples past burn-in
+            write_samples = not burn_in and (np.mod(n_steps + 1, self.n_chunk)) == 0
+
+        if not write_samples:
+            return
+
+        # *** change later to use context manager ***
+        ds_full = xr.open_dataset(out_dir).load()
+        ds_full.close()
+        # append along diff values for step
+        ds_new = xr.Dataset.from_dict(self.ds_storage)
+
+        ds = xr.concat([ds_full, ds_new], dim="step")
+        # ds.to_netcdf(out_dir)  # , append_dim="step")
+
+        ds.to_netcdf(out_dir, compute=False)
+        # futures = client.compute(values)
+        self.ds_storage["coords"]["step"]["data"] += self.n_chunk
+
+        """
+        with xr.open_dataset(out_dir, mode="a") as ds_full:
+            # ds_results.to_zarr(out_dir, append_dim="step")
+            # ds_full = xr.open_dataset(out_dir)  # , engine="netcdf4")
+            
+            ds = xr.concat([ds_full, ds_results], dim="step")
+            # combined_ds = xr.combine_by_coords(
+            #    [ds_full, ds_results]
+            # )  # , coords="step")
+
             ds.to_netcdf(out_dir)  # , append_dim="step")
-
             """
-            with xr.open_dataset(out_dir, mode="a") as ds_full:
-                # ds_results.to_zarr(out_dir, append_dim="step")
-                # ds_full = xr.open_dataset(out_dir)  # , engine="netcdf4")
-                
-                ds = xr.concat([ds_full, ds_results], dim="step")
-                # combined_ds = xr.combine_by_coords(
-                #    [ds_full, ds_results]
-                # )  # , coords="step")
-
-                ds.to_netcdf(out_dir)  # , append_dim="step")
-                """
-            # clear stored results after saving.
+        # clear stored results after saving.
 
     def perform_tempering_swap(self):
         """

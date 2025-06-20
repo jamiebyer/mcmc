@@ -50,7 +50,7 @@ def test_acceptance_criteria():
     pass
 
 
-def test_sampling_prior(rerun=True, plot=False, profiling=True):
+def test_sampling_prior(rerun=False, plot=True, profiling=True):
     """
     run tests for:
     - sample prior; uniform

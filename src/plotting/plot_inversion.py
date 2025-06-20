@@ -233,16 +233,21 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
 
     bounds = {
         "thickness": [0.001, 0.1],  # km
-        "vel_p": [0.1, 6],  # km/s
+        "vel_s": [0.1, 1.8],  # km/s
     }
 
     m = [0.03] + [0.4, 1.5] + [1.6, 2.5] + [2.0, 2.5]
 
+    model_params = ds["model_params"].values
+    step = ds["step"]
+    thickness = model_params[ds["thickness_inds"], :]
+    vel_s = model_params[ds["vel_s_inds"], :]
+
     # plt.subplot(4, 2, 1)
     plt.subplot(2, 2, 1)
     plt.scatter(
-        np.arange(skip_inds, ds["thickness"].shape[0]),
-        ds["thickness"][skip_inds:, 0],
+        np.arange(skip_inds, thickness.shape[1]),
+        thickness[0, skip_inds:],
         s=2,
     )
     plt.axhline(m[0], c="red")
@@ -253,9 +258,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
 
     # plt.subplot(4, 2, 2)
     plt.subplot(2, 2, 2)
-    plt.scatter(
-        np.arange(skip_inds, ds["thickness"].shape[0]), ds["vel_s"][skip_inds:, 0], s=2
-    )
+    plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[0, skip_inds:], s=2)
     plt.axhline(m[1], c="red")
     plt.axhline(bounds["vel_s"][0], c="black")
     plt.axhline(bounds["vel_s"][1], c="black")
@@ -263,9 +266,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     plt.xlabel("step")
     # plt.subplot(4, 2, 3)
     plt.subplot(2, 2, 3)
-    plt.scatter(
-        np.arange(skip_inds, ds["thickness"].shape[0]), ds["vel_s"][skip_inds:, 1], s=2
-    )
+    plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[1, skip_inds:], s=2)
     plt.axhline(m[2], c="red")
     plt.axhline(bounds["vel_s"][0], c="black")
     plt.axhline(bounds["vel_s"][1], c="black")
@@ -277,7 +278,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     # plt.plot(
     #    np.arange(skip_inds, ds["thickness"].shape[0]), ds["err_ratio"][skip_inds:]
     # )
-    plt.plot(np.arange(skip_inds, ds["thickness"].shape[0]), ds["logL"][skip_inds:])
+    plt.plot(np.arange(skip_inds, thickness.shape[1]), ds["logL"][skip_inds:])
     # plt.ylabel("")
     # plt.legend(["acc_rate", "err_ratio", "logL"])
 
@@ -300,9 +301,13 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
         "vel_s": [0.1, 1.8],  # km/s
     }
 
+    model_params = ds["model_params"].values
+    thickness = model_params[ds["thickness_inds"], :]
+    vel_s = model_params[ds["vel_s_inds"], :]
+
     # plt.subplot(4, 2, 1)
     plt.subplot(3, 1, 1)
-    plt.hist(ds["thickness"][skip_inds:, 0], bins=40, density=True)
+    plt.hist(thickness[skip_inds:, 0], bins=40, density=True)
     plt.axvline(bounds["thickness"][0], c="black")
     plt.axvline(bounds["thickness"][1], c="black")
     plt.axvline(m[0], c="red")
@@ -310,14 +315,15 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
 
     # plt.subplot(4, 2, 2)
     plt.subplot(3, 1, 2)
-    plt.hist(ds["vel_s"][skip_inds:, 0], bins=40, density=True)
+    plt.hist(vel_s[0, skip_inds:], bins=40, density=True)
     plt.axvline(bounds["vel_s"][0], c="black")
     plt.axvline(bounds["vel_s"][1], c="black")
     plt.axvline(m[1], c="red")
     plt.xlabel("vel_s 1 (km/s)")
+
     # plt.subplot(4, 2, 3)
     plt.subplot(3, 1, 3)
-    plt.hist(ds["vel_s"][skip_inds:, 1], bins=40, density=True)
+    plt.hist(vel_s[1, skip_inds:], bins=40, density=True)
     plt.axvline(bounds["vel_s"][0], c="black")
     plt.axvline(bounds["vel_s"][1], c="black")
     plt.axvline(m[2], c="red")
