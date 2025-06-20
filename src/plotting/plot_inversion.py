@@ -8,6 +8,7 @@ import xarray as xr
 from matplotlib.colors import LogNorm
 from disba import PhaseDispersion
 from inversion.model import Model
+from inversion.model_params import DispersionCurveParams
 
 
 def plot_observed_data():
@@ -243,6 +244,8 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     thickness = model_params[ds["thickness_inds"], :]
     vel_s = model_params[ds["vel_s_inds"], :]
 
+    _, _, prob_params = get_probable_model(in_path)
+
     # plt.subplot(4, 2, 1)
     plt.subplot(2, 2, 1)
     plt.scatter(
@@ -251,6 +254,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
         s=2,
     )
     plt.axhline(m[0], c="red")
+    plt.axhline(prob_params[0], c="purple")
     plt.axhline(bounds["thickness"][0], c="black")
     plt.axhline(bounds["thickness"][1], c="black")
     plt.ylabel("thickness 1 (km)")
@@ -260,14 +264,17 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     plt.subplot(2, 2, 2)
     plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[0, skip_inds:], s=2)
     plt.axhline(m[1], c="red")
+    plt.axhline(prob_params[1], c="purple")
     plt.axhline(bounds["vel_s"][0], c="black")
     plt.axhline(bounds["vel_s"][1], c="black")
     plt.ylabel("vel_s 1 (km/s)")
     plt.xlabel("step")
+
     # plt.subplot(4, 2, 3)
     plt.subplot(2, 2, 3)
     plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[1, skip_inds:], s=2)
     plt.axhline(m[2], c="red")
+    plt.axhline(prob_params[2], c="purple")
     plt.axhline(bounds["vel_s"][0], c="black")
     plt.axhline(bounds["vel_s"][1], c="black")
     plt.ylabel("vel_s 2 (km/s)")
@@ -305,12 +312,15 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
     thickness = model_params[ds["thickness_inds"], :]
     vel_s = model_params[ds["vel_s_inds"], :]
 
+    _, _, prob_params = get_probable_model(in_path)
+
     # plt.subplot(4, 2, 1)
     plt.subplot(3, 1, 1)
-    plt.hist(thickness[skip_inds:, 0], bins=40, density=True)
+    plt.hist(thickness[0, skip_inds:], bins=40, density=True)
     plt.axvline(bounds["thickness"][0], c="black")
     plt.axvline(bounds["thickness"][1], c="black")
     plt.axvline(m[0], c="red")
+    plt.axvline(prob_params[0], c="purple")
     plt.xlabel("thickness 1 (km)")
 
     # plt.subplot(4, 2, 2)
@@ -319,6 +329,7 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
     plt.axvline(bounds["vel_s"][0], c="black")
     plt.axvline(bounds["vel_s"][1], c="black")
     plt.axvline(m[1], c="red")
+    plt.axvline(prob_params[1], c="purple")
     plt.xlabel("vel_s 1 (km/s)")
 
     # plt.subplot(4, 2, 3)
@@ -327,12 +338,62 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
     plt.axvline(bounds["vel_s"][0], c="black")
     plt.axvline(bounds["vel_s"][1], c="black")
     plt.axvline(m[2], c="red")
+    plt.axvline(prob_params[2], c="purple")
     plt.xlabel("vel_s 2 (km/s)")
 
     plt.tight_layout()
     plt.suptitle("MCMC model params")
 
     plt.show()
+
+
+def get_probable_model(in_path):
+    ds = xr.open_dataset(in_path)
+
+    # get the most probable model params
+    # would add this to end of inversion later.
+    model_params = ds["model_params"].values
+    thickness = model_params[ds["thickness_inds"], :]
+    vel_s = model_params[ds["vel_s_inds"], :]
+
+    counts, bins, _ = plt.hist(thickness[0], bins=100, density=True)
+    ind = np.argmax(counts)
+    prob_thickness = (bins[ind] + bins[ind + 1]) / 2
+
+    counts, bins, _ = plt.hist(vel_s[0], bins=100, density=True)
+    ind = np.argmax(counts)
+    prob_vel_s_0 = (bins[ind] + bins[ind + 1]) / 2
+
+    counts, bins, _ = plt.hist(vel_s[1], bins=100, density=True)
+    ind = np.argmax(counts)
+    prob_vel_s_1 = (bins[ind] + bins[ind + 1]) / 2
+
+    # need to change so can get vel_p and density when opening file.
+    # or result model is saved at the end of run.
+    sigma_model = {
+        "thickness": 0.1,
+        "vel_s": 0.1,
+    }
+    bounds = {
+        "thickness": [0.001, 0.1],  # km
+        "vel_s": [0.1, 1.8],  # km/s
+    }
+    model_params_kwargs = {
+        "n_layers": 1,
+        "sigma_model": sigma_model,
+        "vpvs_ratio": 1.75,
+        "param_bounds": bounds,
+    }
+    model_params = DispersionCurveParams(**model_params_kwargs)
+
+    prob_params = np.array([prob_thickness, prob_vel_s_0, prob_vel_s_1])
+    # run the forward model to predict data.
+    velocity_model = model_params.get_velocity_model(prob_params)
+
+    pd = PhaseDispersion(*velocity_model)
+    pd_rayleigh = pd(ds["periods"].values, mode=0, wave="rayleigh")
+
+    return pd_rayleigh.period, pd_rayleigh.velocity, prob_params
 
 
 def plot_pred_vs_obs(in_path):
@@ -343,14 +404,16 @@ def plot_pred_vs_obs(in_path):
     """
     ds = xr.open_dataset(in_path)
 
-    # determine the most probable most and use it to run the forward model
+    period, velocity, _ = get_probable_model(in_path)
 
-    plt.plot(ds["data_obs"])
+    plt.clf()
+    plt.plot(ds["period"], ds["data_true"])
+    plt.scatter(ds["period"], ds["data_obs"])
 
-    # plt.plot(ds.isel(step=slice(-20, -1))["data_pred"].T)
+    plt.plot(period, velocity)
 
-    pd = PhaseDispersion(*velocity_model)
-    pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+    plt.xlabel("period")
+    plt.ylabel("velocity")
 
     plt.legend(["data_obs", "data_true", "data_pred"])
     plt.show()

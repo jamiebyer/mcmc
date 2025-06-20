@@ -63,13 +63,11 @@ class DispersionCurveParams(ModelParams):
     # functions to compute nuissance params from model params
     def get_vel_p(self, vel_s):
         vel_p = vel_s * self.vpvs_ratio
-        vel_p = np.array([1.6, 2.5])
         return vel_p
 
     def get_density(self, vel_p):
         # using Garner's relation
         density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
-        density = np.array([2.0, 2.5])
         return density
 
     def assemble_param_bounds(self):
@@ -114,6 +112,8 @@ class DispersionCurveParams(ModelParams):
         density = self.get_density(vel_p)
 
         # *** pre-allocate space here ***
+        # have variable for velocity model with pre-allocated space
+        # avoid converting thickness back and forth from list
         velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
 
         return velocity_model

@@ -1,0 +1,4 @@
+.vscode/
+src/__pycache__/*
+src/inversion/__pycache__/*
+tests/__pycache__/*

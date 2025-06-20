@@ -39,8 +39,9 @@ class FieldData(Data):
 
 
 class SyntheticData(Data):
-    def __init__(self, periods, sigma_data, thickness, vel_s, vel_p, density):
-        velocity_model = np.array([thickness + [0], vel_p, vel_s, density])
+    def __init__(self, periods, sigma_data, model_params, thickness, vel_s):
+        params = np.array(thickness + vel_s)
+        velocity_model = model_params.get_velocity_model(params)
         data_true, data_obs = self.generate_observed_data(
             periods, sigma_data, velocity_model
         )
