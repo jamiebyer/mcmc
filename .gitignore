@@ -1,4 +1,7 @@
 .vscode/
 src/__pycache__/*
 src/inversion/__pycache__/*
+src/plotting/__pycache__/*
 tests/__pycache__/*
+results/
+figures/

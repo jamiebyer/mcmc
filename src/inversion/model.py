@@ -28,9 +28,9 @@ class Model:
         self.sigma_model = model_params.assemble_sigma_model()
 
         # acceptance ratio for each parameter
-        self.swap_acc = 0
-        self.swap_rej = 0
-        self.swap_err = 0
+        self.swap_acc = np.zeros(self.model_params.n_model_params)
+        self.swap_rej = np.zeros(self.model_params.n_model_params)
+        self.swap_err = np.zeros(self.model_params.n_model_params)
 
         self.beta = beta
 
@@ -125,6 +125,38 @@ class Model:
         df = pd.DataFrame(results)
         df.to_csv("./results/inversion/optimize_model.csv")
 
+    def stepsize_tuning():
+        """
+        Step size can be found by trial and error.
+        This is sometimes done during burn in, where we target an acceptance rate of ~30%.
+        When a << 30%, decrease step size; when a>>30%, increase step size.
+        Once an acceptable step size it found, stop adapting.
+        Sometimes, we do this by way of diminishing adaptation (see Rosenthal in Handbook of MCMC).
+        Adapt the step size less and less as the sampler progresses, until adaptation vanishes.
+        """
+        pass
+
+    def rotate_params():
+        """
+        # normalizing params
+        norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
+        # rotating params
+        rotated_params = np.matmul(np.transpose(self.rot_mat), norm_params)
+        rotated_bounds = np.matmul(
+            np.transpose(self.rot_mat), param_bounds[:, :1] - param_bounds[:, 0]
+        )
+
+        # validate params
+
+        # rotating back
+        perturbed_norm_params = np.matmul(self.rot_mat, perturbed_rotated_params)
+        # rescaling
+        perturbed_params = param_bounds[:, 0] + (
+            perturbed_norm_params * param_bounds[:, 2]
+        )
+        """
+        pass
+
     def perturb_params(
         self,
         data,
@@ -139,26 +171,8 @@ class Model:
 
         :param scale_factor:
         """
-
+        # can normalize regardless
         if rotation:
-            """
-            # normalizing params
-            norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
-            # rotating params
-            rotated_params = np.matmul(np.transpose(self.rot_mat), norm_params)
-            rotated_bounds = np.matmul(
-                np.transpose(self.rot_mat), param_bounds[:, :1] - param_bounds[:, 0]
-            )
-
-            # validate params
-
-            # rotating back
-            perturbed_norm_params = np.matmul(self.rot_mat, perturbed_rotated_params)
-            # rescaling
-            perturbed_params = param_bounds[:, 0] + (
-                perturbed_norm_params * param_bounds[:, 2]
-            )
-            """
             pass
 
         # randomly select a model parameter to perturb
@@ -190,26 +204,25 @@ class Model:
         if valid_params:
             # check acceptance criteria
             acc = self.acceptance_criteria(
-                test_model, data, sample_prior=sample_prior, T=T
+                test_model, ind, data, sample_prior=sample_prior, T=T
             )
             if acc:
                 self.model_params.model_params = test_model_params.copy()
-                self.swap_acc += 1
+                self.swap_acc[ind] += 1
             else:
-                self.swap_rej += 1
+                self.swap_rej[ind] += 1
         else:
-            self.swap_rej += 1
+            self.swap_rej[ind] += 1
 
-    def acceptance_criteria(self, test_model, data, T, sample_prior):
+    def acceptance_criteria(self, test_model, ind, data, T, sample_prior):
         if sample_prior:
             logL_new, data_pred_new = 1, np.empty(data.n_data)
-            # return True
         else:
             try:
                 logL_new, data_pred_new = self.get_likelihood(test_model, data)
             except (DispersionError, ZeroDivisionError):
                 # add specific condition here for failed forward model
-                self.swap_err += 1
+                self.swap_err[ind] += 1
                 return False
 
         # Compute likelihood ratio in log space

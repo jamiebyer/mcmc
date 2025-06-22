@@ -1,11 +1,7 @@
 import pytest
 import numpy as np
 
-from plotting.plot_inversion import (
-    plot_inversion_results_param_prob,
-    plot_inversion_results_param_time,
-    plot_pred_vs_obs,
-)
+from plotting.plot_inversion import *
 import matplotlib.pyplot as plt
 import xarray as xr
 import os
@@ -46,6 +42,40 @@ def setup_data(model_params, sigma_data):
 def test_acceptance_criteria():
     # try proposing a model out of bounds
     # rejection records the same model twice
+    # test that all variables have an acceptance rate of ~0.3
+    # compare the start of the run and the end of the run
+    pass
+
+
+def test_proposal_distribution():
+    # run an inversion and check that the results are roughly uniform
+    # and in bounds.
+    pass
+
+
+def test_perturb_params():
+    # check that one parameter is modified at a time
+    # check the size of the perturbations....
+    # test that each of the params are being modified roughly the same amount.
+    pass
+
+
+def test_likelihood():
+    # test the computation...
+    # make sure the likelihood is negative
+    # make sure it's increasing with time
+    # validate the specific computation somehow...
+
+    # for starting at the true model,
+    # We expect that the sampler will find some logL values
+    # that are better than those of the true model. However, most will be lower in logL.
+
+    # for low noise model
+    pass
+
+
+def test_writing_samples():
+    #
     pass
 
 
@@ -61,7 +91,7 @@ def test_sampling_prior(rerun=False, plot=True):
     """
     sample_prior = False
     proposal_distribution = "cauchy"
-    set_starting_model = True
+    set_starting_model = False
     noise = 0.1
     sigma_model = {
         "thickness": 0.1,
@@ -133,9 +163,11 @@ def test_sampling_prior(rerun=False, plot=True):
 
     # assert, all model params should be in bounds
     if plot:
-        plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
-        plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
-        plot_pred_vs_obs(in_path)
+        # plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
+        # plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
+        # plot_pred_vs_obs(in_path)
+        # plot_pred_hist(in_path)
+        plot_resulting_model(in_path)
 
 
 # TESTING OPTIMIZATION INVERSION

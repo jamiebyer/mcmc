@@ -64,7 +64,7 @@ class Inversion:
     def define_dataset(self, model_params, out_dir):
         # write empty dataset to file, with coord for n_data
         coords = {
-            "n_data": np.arange(self.data.n_data),
+            "periods": self.data.periods,
             "step": np.array([]),
         }
         ds = xr.Dataset(coords=coords)
@@ -84,7 +84,7 @@ class Inversion:
 
         self.ds_storage = {
             "coords": {
-                "n_data": {"dims": "n_data", "data": np.arange(self.data.n_data)},
+                "period": {"dims": "period", "data": self.data.periods},
                 "step": {"dims": "step", "data": np.arange(self.n_chunk)},
                 "n_model_params": {
                     "dims": "n_model_params",
@@ -97,8 +97,20 @@ class Inversion:
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
                 "logL": {"dims": ["step"], "data": np.empty(self.n_chunk)},
-                "acc_rate": {"dims": ["step"], "data": np.empty(self.n_chunk)},
-                "err_ratio": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+                "acc_rate": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "err_ratio": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "data_true": {"dims": ["period"], "data": self.data.data_true},
+                "data_obs": {"dims": ["period"], "data": self.data.data_obs},
+                "data_pred": {
+                    "dims": ["period", "step"],
+                    "data": np.empty((self.data.n_data, self.n_chunk)),
+                },
             },
         }
 
@@ -271,22 +283,22 @@ class Inversion:
 
                 # a = self.ds_storage.loc[["logL", "acc_rate"]][{"step": n_save}]
                 self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
-                # self.ds_storage["data_pred"][n_save] = chain.data_pred.copy()
+                self.ds_storage["data_vars"]["data_pred"]["data"][
+                    :, n_save
+                ] = chain.data_pred.copy()
                 # self.ds_storage["beta"][{"step": n_step}] = chain.beta
 
-                if chain.swap_acc == 0:
-                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = 0
-                else:
-                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
-                        chain.swap_acc / (chain.swap_acc + chain.swap_rej)
-                    )
+                zero_inds = chain.swap_acc == 0
+                self.ds_storage["data_vars"]["acc_rate"]["data"][zero_inds, n_save] = 0
+                self.ds_storage["data_vars"]["acc_rate"]["data"][
+                    not zero_inds, n_save
+                ] = chain.swap_acc / (chain.swap_acc + chain.swap_rej)
 
-                if chain.swap_rej == 0:
-                    self.ds_storage["data_vars"]["err_ratio"]["data"][n_save] = 0
-                else:
-                    self.ds_storage["data_vars"]["err_ratio"]["data"][n_save] = (
-                        chain.swap_err / chain.swap_rej
-                    )
+                zero_inds = chain.swap_rej == 0
+                self.ds_storage["data_vars"]["err_ratio"]["data"][zero_inds, n_save] = 0
+                self.ds_storage["data_vars"]["err_ratio"]["data"][
+                    not zero_inds, n_save
+                ] = (chain.swap_err / chain.swap_rej)
 
     def write_samples(self, save_burn_in, n_steps, burn_in, out_dir):
         """
@@ -315,7 +327,7 @@ class Inversion:
         # append along diff values for step
         ds_new = xr.Dataset.from_dict(self.ds_storage)
 
-        ds = xr.concat([ds_full, ds_new], dim="step")
+        ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
         # ds.to_netcdf(out_dir)  # , append_dim="step")
 
         ds.to_netcdf(out_dir, compute=False)

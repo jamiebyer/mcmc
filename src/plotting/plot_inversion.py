@@ -9,6 +9,7 @@ from matplotlib.colors import LogNorm
 from disba import PhaseDispersion
 from inversion.model import Model
 from inversion.model_params import DispersionCurveParams
+from matplotlib.gridspec import GridSpec
 
 
 def plot_observed_data():
@@ -230,6 +231,7 @@ def plot_optimized_model():
 
 
 def plot_inversion_results_param_time(in_path, skip_inds=0):
+    # *** plot acceptance rate and likelihood ***
     ds = xr.open_dataset(in_path)
 
     bounds = {
@@ -347,6 +349,99 @@ def plot_inversion_results_param_prob(in_path, skip_inds=0):
     plt.show()
 
 
+def plot_resulting_model(in_path):
+    """
+    plot the resulting model as velocity vs. depth
+    with the histogram of probability for the thickness of the layer
+    """
+
+    fig = plt.figure()
+
+    ds = xr.open_dataset(in_path)
+
+    bounds = {
+        "thickness": [0.001, 0.1],  # km
+        "vel_s": [0.1, 1.8],  # km/s
+    }
+
+    _, _, prob_params = get_probable_model(in_path)
+
+    t = prob_params[0]
+    v1 = prob_params[1]
+    v2 = prob_params[2]
+
+    plt.clf()
+
+    gs = GridSpec(4, 3, figure=fig)
+
+    # Add subplots with custom spans
+    ax1 = fig.add_subplot(gs[1:3, 0:2])
+
+    # Add data to each subplot
+    ax1.scatter([v1, v1, v2, v2], [0, t, t, 0.1])
+    ax1.plot([v1, v1, v2, v2], [0, t, t, 0.1])
+
+    ax1.text(
+        v2 - 0.2,
+        0.02,
+        "t: "
+        + str(np.round(t, 2))
+        + " (km)\nv1: "
+        + str(np.round(v1, 2))
+        + " (km/s)\nv2: "
+        + str(np.round(v2, 2))
+        + " (km/s)",
+    )
+
+    ax1.set_xlim([0.1, 1.8])
+    ax1.set_ylim([0, 0.1])
+
+    # ax = plt.gca()
+    # ax.set_ylim(ax.get_ylim()[::-1])
+    plt.gca().invert_yaxis()
+
+    ax1.set_xlabel("velocity (km/s)")
+    ax1.set_ylabel("depth (km)")
+
+    # plotting histograms
+    model_params = ds["model_params"].values
+    thickness = model_params[ds["thickness_inds"], :]
+    vel_s = model_params[ds["vel_s_inds"], :]
+
+    ax2 = fig.add_subplot(gs[0, 0:2])
+    ax2.hist(vel_s[0, :], bins=40, density=True)
+    ax2.axvline(bounds["vel_s"][0], c="black")
+    ax2.axvline(bounds["vel_s"][1], c="black")
+    # ax2.axvline(m[1], c="red")
+    ax2.axvline(prob_params[1], c="purple")
+    ax2.set_xlabel("vel_s 1 (km/s)")
+
+    ax3 = fig.add_subplot(gs[3, 0:2])
+    ax3.hist(vel_s[1, :], bins=40, density=True)
+    ax3.axvline(bounds["vel_s"][0], c="black")
+    ax3.axvline(bounds["vel_s"][1], c="black")
+    # ax3.axvline(m[2], c="red")
+    ax3.axvline(prob_params[2], c="purple")
+    ax3.set_xlabel("vel_s 2 (km/s)")
+
+    ax4 = fig.add_subplot(gs[1:3, 2])
+    ax4.hist(
+        thickness[0, :],
+        bins=40,
+        density=True,
+        orientation="horizontal",
+    )
+    ax4.axvline(bounds["thickness"][0], c="black")
+    ax4.axvline(bounds["thickness"][1], c="black")
+    # ax4.axvline(m[0], c="red")
+    ax4.axvline(prob_params[0], c="purple")
+    ax4.set_xlabel("thickness 1 (km)")
+
+    plt.subplots_adjust(wspace=0, hspace=0)
+    plt.tight_layout()
+    plt.show()
+
+
 def get_probable_model(in_path):
     ds = xr.open_dataset(in_path)
 
@@ -407,13 +502,43 @@ def plot_pred_vs_obs(in_path):
     period, velocity, _ = get_probable_model(in_path)
 
     plt.clf()
-    plt.plot(ds["period"], ds["data_true"])
-    plt.scatter(ds["period"], ds["data_obs"])
+    plt.plot(ds["period"], ds["data_true"], zorder=5)
+    plt.scatter(ds["period"], ds["data_obs"], zorder=5)
 
-    plt.plot(period, velocity)
+    plt.plot(period, velocity, zorder=5)
+
+    plt.plot(ds["period"], ds["data_pred"], c="grey", alpha=0.01, zorder=0)
 
     plt.xlabel("period")
     plt.ylabel("velocity")
 
     plt.legend(["data_obs", "data_true", "data_pred"])
+    plt.show()
+
+
+def plot_pred_hist(in_path):
+    """
+    save data separately? in a separate .nc with true data if applicable.
+    then the predicted model is read in from the inversion
+    should the predicted model be saved directly, or computed from final model.
+    """
+    ds = xr.open_dataset(in_path)
+
+    # period, velocity, _ = get_probable_model(in_path)
+
+    bins_list = []
+    counts_list = []
+    for ind, p in enumerate(ds["period"]):
+        counts, bins, _ = plt.hist(ds["data_pred"][ind, :])
+        bins_list.append(bins)
+        counts_list.append(counts)
+
+    plt.clf()
+    plt.imshow(np.array(counts_list).T, aspect="auto")
+    plt.xscale("log")
+    plt.colorbar(norm="log")
+    # plt.clf()
+    # print(ds["period"].values.shape, ds["data_pred"].values.shape)
+    # plt.imshow(ds["data_pred"].values, aspect="auto")
+
     plt.show()
