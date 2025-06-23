@@ -79,7 +79,7 @@ def test_writing_samples():
     pass
 
 
-def test_sampling_prior(rerun=False, plot=True):
+def test_sampling_prior(rerun=True, plot=True):
     """
     run tests for:
     - sample prior; uniform
@@ -164,10 +164,11 @@ def test_sampling_prior(rerun=False, plot=True):
     # assert, all model params should be in bounds
     if plot:
         # plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
-        # plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
+        plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
         # plot_pred_vs_obs(in_path)
         # plot_pred_hist(in_path)
-        plot_resulting_model(in_path)
+        # plot_resulting_model(in_path)
+        # pass
 
 
 # TESTING OPTIMIZATION INVERSION

@@ -247,9 +247,9 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     vel_s = model_params[ds["vel_s_inds"], :]
 
     _, _, prob_params = get_probable_model(in_path)
+    plt.clf()
 
-    # plt.subplot(4, 2, 1)
-    plt.subplot(2, 2, 1)
+    plt.subplot(3, 2, 1)
     plt.scatter(
         np.arange(skip_inds, thickness.shape[1]),
         thickness[0, skip_inds:],
@@ -262,8 +262,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     plt.ylabel("thickness 1 (km)")
     plt.xlabel("step")
 
-    # plt.subplot(4, 2, 2)
-    plt.subplot(2, 2, 2)
+    plt.subplot(3, 2, 2)
     plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[0, skip_inds:], s=2)
     plt.axhline(m[1], c="red")
     plt.axhline(prob_params[1], c="purple")
@@ -272,8 +271,7 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     plt.ylabel("vel_s 1 (km/s)")
     plt.xlabel("step")
 
-    # plt.subplot(4, 2, 3)
-    plt.subplot(2, 2, 3)
+    plt.subplot(3, 2, 3)
     plt.scatter(np.arange(skip_inds, thickness.shape[1]), vel_s[1, skip_inds:], s=2)
     plt.axhline(m[2], c="red")
     plt.axhline(prob_params[2], c="purple")
@@ -282,14 +280,19 @@ def plot_inversion_results_param_time(in_path, skip_inds=0):
     plt.ylabel("vel_s 2 (km/s)")
     plt.xlabel("step")
 
-    plt.subplot(2, 2, 4)
-    # plt.plot(np.arange(skip_inds, ds["thickness"].shape[0]), ds["acc_rate"][skip_inds:])
+    plt.subplot(3, 2, 4)
+    plt.plot(np.arange(skip_inds, thickness.shape[1]), ds["logL"][skip_inds:])
+    plt.xlabel("step")
+    plt.ylabel("logL")
+
+    plt.subplot(3, 2, 5)
+    plt.plot(np.arange(skip_inds, thickness.shape[1]), ds["acc_rate"][:, skip_inds:].T)
     # plt.plot(
     #    np.arange(skip_inds, ds["thickness"].shape[0]), ds["err_ratio"][skip_inds:]
     # )
-    plt.plot(np.arange(skip_inds, thickness.shape[1]), ds["logL"][skip_inds:])
-    # plt.ylabel("")
-    # plt.legend(["acc_rate", "err_ratio", "logL"])
+    plt.legend(["t", "v1", "v2"])
+    plt.xlabel("step")
+    plt.ylabel("acceptance rate")
 
     plt.tight_layout()
     plt.suptitle("MCMC model params")

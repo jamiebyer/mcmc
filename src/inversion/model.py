@@ -136,7 +136,7 @@ class Model:
         """
         pass
 
-    def rotate_params():
+    def rotate_params(self):
         """
         # normalizing params
         norm_params = (self.model_params - param_bounds[:, 0]) / param_bounds[:, 2]
@@ -173,7 +173,7 @@ class Model:
         """
         # can normalize regardless
         if rotation:
-            pass
+            self.rotate_params()
 
         # randomly select a model parameter to perturb
         ind = np.random.randint(self.model_params.n_model_params)

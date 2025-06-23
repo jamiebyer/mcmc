@@ -287,18 +287,26 @@ class Inversion:
                     :, n_save
                 ] = chain.data_pred.copy()
                 # self.ds_storage["beta"][{"step": n_step}] = chain.beta
+                """
+                # save acceptance rate
+                self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = np.where(
+                    chain.swap_acc == 0,
+                    chain.swap_acc / (chain.swap_acc + chain.swap_rej),
+                    0,
+                )
+                """
+                self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
+                    chain.swap_acc / (chain.swap_acc + chain.swap_rej)
+                )
 
-                zero_inds = chain.swap_acc == 0
-                self.ds_storage["data_vars"]["acc_rate"]["data"][zero_inds, n_save] = 0
-                self.ds_storage["data_vars"]["acc_rate"]["data"][
-                    not zero_inds, n_save
-                ] = chain.swap_acc / (chain.swap_acc + chain.swap_rej)
-
-                zero_inds = chain.swap_rej == 0
-                self.ds_storage["data_vars"]["err_ratio"]["data"][zero_inds, n_save] = 0
+                """
                 self.ds_storage["data_vars"]["err_ratio"]["data"][
-                    not zero_inds, n_save
+                    chain.swap_rej == 0, n_save
+                ] = 0
+                self.ds_storage["data_vars"]["err_ratio"]["data"][
+                    chain.swap_rej != 0, n_save
                 ] = (chain.swap_err / chain.swap_rej)
+                """
 
     def write_samples(self, save_burn_in, n_steps, burn_in, out_dir):
         """
