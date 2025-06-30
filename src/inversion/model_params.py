@@ -22,12 +22,12 @@ class ModelParams:
 
 class DispersionCurveParams(ModelParams):
 
-    def __init__(self, n_layers, param_bounds, sigma_model, vpvs_ratio):
+    def __init__(self, n_layers, param_bounds, posterior_width, vpvs_ratio):
         # initialize params
         self.n_layers = n_layers
         self.vpvs_ratio = vpvs_ratio
         self.param_bounds = param_bounds
-        self.sigma_model = sigma_model
+        self.posterior_width = posterior_width
 
         # get number of parameters
         self.n_model_params = (2 * self.n_layers) + 1
@@ -86,19 +86,19 @@ class DispersionCurveParams(ModelParams):
 
         return param_bounds
 
-    def assemble_sigma_model(self):
+    def assemble_posterior_width(self):
         """
         from sigma for each param.
         """
-        sigma_model = np.concatenate(
+        posterior_width = np.concatenate(
             (
-                [self.sigma_model["thickness"]] * self.n_layers,
-                [self.sigma_model["vel_s"]] * (self.n_layers + 1),
+                [self.posterior_width["thickness"]] * self.n_layers,
+                [self.posterior_width["vel_s"]] * (self.n_layers + 1),
             ),
             axis=0,
         )
 
-        return sigma_model
+        return posterior_width
 
     def get_velocity_model(self, model_params):
         """

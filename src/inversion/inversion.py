@@ -17,6 +17,7 @@ class Inversion:
         self,
         data,
         model_params,
+        sigma_data,
         n_burn,
         n_chunk,
         n_mcmc,
@@ -54,6 +55,7 @@ class Inversion:
         self.n_chains = n_chains
         self.initialize_chains(
             model_params,
+            sigma_data,
             beta_spacing_factor,
         )
 
@@ -143,6 +145,7 @@ class Inversion:
     def initialize_chains(
         self,
         model_params,
+        sigma_data,
         beta_spacing_factor,
         # optimize_starting_model=False,
     ):
@@ -158,6 +161,7 @@ class Inversion:
         for ind in range(self.n_chains):
             model = Model(
                 deepcopy(model_params),
+                sigma_data,
                 betas[ind],
             )
 
@@ -192,7 +196,6 @@ class Inversion:
         self,
         model_params,
         proposal_distribution,
-        scale_factor=[1, 1],
         save_burn_in=True,
         rotation=False,
         out_filename=None,
