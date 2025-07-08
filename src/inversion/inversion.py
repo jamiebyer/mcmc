@@ -10,6 +10,7 @@ import xarray as xr
 import time
 from copy import deepcopy
 import dask.dataframe as dd
+import time
 
 
 class Inversion:
@@ -231,6 +232,7 @@ class Inversion:
         """
         perform the main loop, for n_mcmc iterations.
         """
+        start_time = time.time()
         out_path = self.out_dir + "results-" + self.out_filename + ".nc"
         # create empty file to save results
         # define dict for saving results
@@ -265,7 +267,8 @@ class Inversion:
                 self.write_samples(n_steps, out_path)
 
         # add most probable model to file
-        self.get_probable_model(out_path)
+        # (and total computation time)
+        self.write_probable_model(out_path, start_time)
 
     def store_samples(self, n_step):
         """
@@ -293,15 +296,14 @@ class Inversion:
                 self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
                     chain.swap_acc / (chain.swap_acc + chain.swap_rej)
                 )
-                # error rate
-                """
+                # error ratio
+                # errors : rejected proposals
                 self.ds_storage["data_vars"]["err_ratio"]["data"][
                     chain.swap_rej == 0, n_save
                 ] = 0
                 self.ds_storage["data_vars"]["err_ratio"]["data"][
                     chain.swap_rej != 0, n_save
                 ] = (chain.swap_err / chain.swap_rej)
-                """
 
     def write_samples(self, n_steps, out_path):
         """
@@ -322,6 +324,8 @@ class Inversion:
         if not write_samples:
             return
 
+        print(str(n_steps) + " / " + str(self.n_mcmc))
+
         # *** change later to use context manager ***
         ds_full = xr.open_dataset(out_path).load()
         ds_full.close()
@@ -329,31 +333,15 @@ class Inversion:
         ds_new = xr.Dataset.from_dict(self.ds_storage)
 
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
-        # ds.to_netcdf(out_dir)  # , append_dim="step")
 
         ds.to_netcdf(out_path, compute=False)
         # futures = client.compute(values)
 
-        #
+        # update step number on dict storage
         self.ds_storage["coords"]["step"]["data"] += self.n_chunk
 
+    def write_probable_model(self, out_path, start_time, n_bins=100):
         """
-        with xr.open_dataset(out_dir, mode="a") as ds_full:
-            # ds_results.to_zarr(out_dir, append_dim="step")
-            # ds_full = xr.open_dataset(out_dir)  # , engine="netcdf4")
-            
-            ds = xr.concat([ds_full, ds_results], dim="step")
-            # combined_ds = xr.combine_by_coords(
-            #    [ds_full, ds_results]
-            # )  # , coords="step")
-
-            ds.to_netcdf(out_dir)  # , append_dim="step")
-        """
-        # clear stored results after saving.
-
-    def get_probable_model(self, out_path, n_bins=100):
-        """
-        don't include burn in when computing most probable model.
         read in file to use all saved samples.
 
         :param out_dir:
@@ -404,11 +392,11 @@ class Inversion:
         ds_full["prob_params"] = ("n_model_params", prob_params)
         ds_full["data_prob"] = ("period", data_pred)
 
-        # save to file
-        # append along diff values for step
-        # ds_new = xr.Dataset.from_dict(self.ds_storage)
+        # save the inversion computation time
+        end_time = time.time()
+        computation_time = end_time - start_time
+        ds_full = ds_full.assign_attrs(computation_time=computation_time)
 
-        # ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
         ds_full.to_netcdf(out_path, compute=False)
 
     def perform_tempering_swap(self):
