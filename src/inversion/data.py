@@ -1,9 +1,6 @@
 import numpy as np
 from disba import PhaseDispersion
 from disba._exception import DispersionError
-import pandas as pd
-from scipy import interpolate
-import matplotlib.pyplot as plt
 
 np.complex_ = np.complex64
 
@@ -19,6 +16,20 @@ class Data:
             self.data_cov = np.diag(sigma_data**2)
         elif isinstance(sigma_data, float):
             self.data_cov = np.eye(self.n_data) * sigma_data**2
+
+    def get_data_dict(self):
+        data_dict = {
+            "coords": {
+                "period": {"dims": ["period"], "data": self.periods},
+            },
+            "data_vars": {
+                "data_true": {"dims": ["period"], "data": self.data_true},
+                "data_obs": {"dims": ["period"], "data": self.data_obs},
+            },
+            "attrs": {"sigma_data": self.sigma_data},
+        }
+
+        return data_dict
 
 
 class FieldData(Data):
@@ -40,33 +51,17 @@ class FieldData(Data):
 
 class SyntheticData(Data):
     def __init__(self, periods, sigma_data, model_params, thickness, vel_s):
+        """ """
         params = np.array(thickness + vel_s)
         velocity_model = model_params.get_velocity_model(params)
         data_true, data_obs = self.generate_observed_data(
             periods, sigma_data, velocity_model
         )
         self.data_true = data_true
+        self.model_true = params
         super().__init__(periods, data_obs, sigma_data)
 
-    def generate_observed_data(self, periods, sigma_data, velocity_model):
-        pd = PhaseDispersion(*velocity_model)
-        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
-
-        data_true = pd_rayleigh.velocity
-        data_obs = data_true + sigma_data * np.random.randn(len(periods))
-        return data_true, data_obs
-
-
-class GeneratedData(Data):
-    def __init__(self, periods, sigma_data, bounds, n_layers):
-        # velocity_model = np.array([thickness + [0], vel_p, vel_s, density])
-        data_true, data_obs = self.generate_observed_data(
-            periods, sigma_data, bounds, n_layers
-        )
-        self.data_true = data_true
-        super().__init__(periods, data_obs, sigma_data)
-
-    def generate_observed_data(self, periods, sigma_data, bounds, n_layers):
+    def generate_true_model(self, periods, sigma_data, bounds, n_layers):
         valid_params = False
         while not valid_params:
             thickness = np.random.uniform(
@@ -89,5 +84,24 @@ class GeneratedData(Data):
                 pass
 
         data_true = pd_rayleigh.velocity
-        data_obs = data_true + sigma_data * np.random.randn(len(periods))
+        # sigma_data is a percentage, so multiply by true data
+        data_obs = data_true + sigma_data * data_true * np.random.randn(len(periods))
+        model_true = np.concatenate((thickness, vel_s))
+
+        return data_true, data_obs, model_true
+
+    def generate_observed_data(self, periods, sigma_data, velocity_model):
+        pd = PhaseDispersion(*velocity_model)
+        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+
+        data_true = pd_rayleigh.velocity
+        # sigma_data is a percentage, so multiply by true data
+        data_obs = data_true + sigma_data * data_true * np.random.randn(len(periods))
         return data_true, data_obs
+
+    def get_data_dict(self):
+        data_dict = super().get_data_dict()
+        data_dict["data_vars"].update(
+            {"model_true": {"dims": ["n_model_params"], "data": self.model_true}}
+        )
+        return data_dict

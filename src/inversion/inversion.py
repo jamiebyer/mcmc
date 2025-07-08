@@ -23,6 +23,7 @@ class Inversion:
         n_mcmc,
         beta_spacing_factor=None,
         n_chains=1,
+        out_filename=None,
     ):
         """
         :param n_data: number of data observed.
@@ -52,6 +53,7 @@ class Inversion:
         self.n_mcmc = n_mcmc  # number of steps for the random walk
 
         # initialize chains, generate starting params.
+        self.model_params = model_params
         self.n_chains = n_chains
         self.initialize_chains(
             model_params,
@@ -61,37 +63,67 @@ class Inversion:
 
         # set initial likelihood ***
 
-        # loop over params in dict, and add with appropriate dimensions
+        # *** need a check for if the file exists ***
+        # define out_dir
+        self.out_dir = "./results/inversion/"
+        if not out_filename:
+            self.out_filename = str(int(time.time()))
+        else:
+            self.out_filename = out_filename
 
-    def define_dataset(self, model_params, out_dir):
+        # save input inversion params and data info
+        # create dataset
+        # update with dictionary from data class
+        self.define_input_dataset(data, model_params)
+
+    def define_input_dataset(self, data, model_params):
+        # get data dict and model params dict
+        input_dict = {"coords": {}, "data_vars": {}, "attrs": {}}
+
+        m_dict = model_params.get_model_params_dict()
+        d_dict = data.get_data_dict()
+
+        input_dict["coords"].update(m_dict["coords"])
+        input_dict["coords"].update(d_dict["coords"])
+
+        input_dict["data_vars"].update(m_dict["data_vars"])
+        input_dict["data_vars"].update(d_dict["data_vars"])
+
+        input_dict["attrs"].update(m_dict["attrs"])
+        input_dict["attrs"].update(d_dict["attrs"])
+
+        input_dict["dims"] = {
+            k: len(v["data"]) for k, v in input_dict["coords"].items()
+        }
+
+        input_ds = xr.Dataset.from_dict(input_dict)
+
+        # if the output folder doesn't exist, create it.
+        out_path = self.out_dir + "input-" + self.out_filename + ".nc"
+        # saved dataset should just have parameter names, dimensions, and constants
+        if not os.path.isfile(out_path):
+            input_ds.to_netcdf(out_path)
+
+    def define_results_dataset(self, model_params):
         # write empty dataset to file, with coord for n_data
         coords = {
-            "periods": self.data.periods,
+            # "periods": self.data.periods,
             "step": np.array([]),
         }
         ds = xr.Dataset(coords=coords)
 
-        for key, val in model_params.params_info.items():
-            ds = ds.assign({key + "_inds": val["inds"]})
-
-        # if the output folder doesn't exist, create it.
-        path_dir = os.path.dirname(out_dir)
-        if not os.path.isdir(path_dir):
-            os.mkdir(path_dir)
-
-        # saved dataset should just have parameter names, dimensions, and constants
-        if not os.path.isfile(out_dir):
-            # ds_results.to_zarr(out_dir)
-            ds.to_netcdf(out_dir)
+        out_path = self.out_dir + "results-" + self.out_filename + ".nc"
+        if not os.path.isfile(out_path):
+            ds.to_netcdf(out_path)
 
         self.ds_storage = {
             "coords": {
                 "period": {"dims": "period", "data": self.data.periods},
-                "step": {"dims": "step", "data": np.arange(self.n_chunk)},
                 "n_model_params": {
                     "dims": "n_model_params",
                     "data": np.arange(model_params.n_model_params),
                 },
+                "step": {"dims": "step", "data": np.arange(self.n_chunk)},
             },
             "data_vars": {
                 "model_params": {
@@ -107,8 +139,6 @@ class Inversion:
                     "dims": ["n_model_params", "step"],
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
-                "data_true": {"dims": ["period"], "data": self.data.data_true},
-                "data_obs": {"dims": ["period"], "data": self.data.data_obs},
                 "data_pred": {
                     "dims": ["period", "step"],
                     "data": np.empty((self.data.n_data, self.n_chunk)),
@@ -196,44 +226,23 @@ class Inversion:
         self,
         model_params,
         proposal_distribution,
-        save_burn_in=True,
-        rotation=False,
-        out_filename=None,
         sample_prior=False,
     ):
         """
         perform the main loop, for n_mcmc iterations.
-
-        :param hist_conv: value to determine convergence.
-        :param out_dir: directory where to save results.
-        :param save_burn_in:
         """
-        if not out_filename:
-            out_dir = "./results/inversion/results-" + str(int(time.time())) + ".nc"
-        else:
-            out_dir = "./results/inversion/results-" + out_filename + ".nc"
-
-        # make it a dataset from the beginning?
-        # allocate space from the start
-        # could use model_params to
-        self.define_dataset(model_params, out_dir)
+        out_path = self.out_dir + "results-" + self.out_filename + ".nc"
+        # create empty file to save results
+        # define dict for saving results
+        self.define_results_dataset(model_params)
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
             burn_in = n_steps < self.n_burn
-            # save burn in: whether or not to save samples from burn in stage
-            # (labeled?)
-
-            # checking whether to write samples
-            # check if saving burn in, check if there is a chunk of n_keep samples to
 
             delayed_results = []
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
-
-                # rotation matrix step needs to be before step
-                if rotation:
-                    chain_model.update_rotation_matrix(burn_in)
 
                 chain_model.perturb_params(
                     self.data,
@@ -242,7 +251,6 @@ class Inversion:
                 )
 
                 delayed_results.append(chain_model)
-                # delayed_results.append(updated_model)
 
             # synchronizing the separate chains
             self.chains = delayed_results
@@ -251,57 +259,41 @@ class Inversion:
                 # tempering exchange move
                 self.perform_tempering_swap()
 
-            # check convergence using model param hist
-            # *** add back later ***
+            if not burn_in:
+                # store every sample; only write to file every n_chunk samples.
+                self.store_samples(n_steps)
+                self.write_samples(n_steps, out_path)
 
-            # saving sample and write to file
+        # add most probable model to file
+        self.get_probable_model(out_path)
 
-            # store every sample; only write to file every n_chunk samples.
-            self.store_samples(n_steps, self.n_chunk)
-
-            self.write_samples(save_burn_in, n_steps, burn_in, out_dir)
-
-    def store_samples(self, n_step, n_samples):
+    def store_samples(self, n_step):
         """
         write out to .zarr in chunks of size n_keep.
 
         :param n_step: current step number in the random walk.
-        :param n_samples: number of samples being saved.
-        :param write_samples: whether or not to write samples to file. (write every n_keep steps)
-        :param out_dir: the output directory where to save results.
         """
-
         # the step size on ds_storage should be up to n_batch, but should start at n_steps for the written ds.
-        n_save = n_step % n_samples
+        n_save = n_step % self.n_chunk
 
         for chain in self.chains:
             # saving the chain model with beta of 1
             if chain.beta == 1:
                 # update storage dataset with new param values
-                # need to loop over variables for names and inds
-                # *** alternatively, save model params and split to specific variables when writing to file. ***
                 self.ds_storage["data_vars"]["model_params"]["data"][
                     :, n_save
                 ] = chain.model_params.model_params.copy()
-
-                # a = self.ds_storage.loc[["logL", "acc_rate"]][{"step": n_save}]
                 self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
                 self.ds_storage["data_vars"]["data_pred"]["data"][
                     :, n_save
                 ] = chain.data_pred.copy()
                 # self.ds_storage["beta"][{"step": n_step}] = chain.beta
-                """
-                # save acceptance rate
-                self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = np.where(
-                    chain.swap_acc == 0,
-                    chain.swap_acc / (chain.swap_acc + chain.swap_rej),
-                    0,
-                )
-                """
+
+                # acceptance rate
                 self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
                     chain.swap_acc / (chain.swap_acc + chain.swap_rej)
                 )
-
+                # error rate
                 """
                 self.ds_storage["data_vars"]["err_ratio"]["data"][
                     chain.swap_rej == 0, n_save
@@ -311,7 +303,7 @@ class Inversion:
                 ] = (chain.swap_err / chain.swap_rej)
                 """
 
-    def write_samples(self, save_burn_in, n_steps, burn_in, out_dir):
+    def write_samples(self, n_steps, out_path):
         """
         append current samples to file
 
@@ -319,21 +311,19 @@ class Inversion:
         netcdf cannot append along a dimension currently...
         zarr has an issue with the compression when saving...
         later could save each chunk in an individual file and concat at the end...
+
+        :param n_steps:
+        :param out_dir:
         """
         # save n_chunk samples at a time
-        if save_burn_in:
-            write_samples = (n_steps + 1 >= self.n_chunk) and (
-                (np.mod(n_steps + 1, self.n_chunk)) == 0
-            )
-        else:
-            # save samples past burn-in
-            write_samples = not burn_in and (np.mod(n_steps + 1, self.n_chunk)) == 0
+        # n_samples should be self.n_chunk until convergence, where it could be uneven.
+        write_samples = np.mod(n_steps + 1, self.n_chunk) == 0
 
         if not write_samples:
             return
 
         # *** change later to use context manager ***
-        ds_full = xr.open_dataset(out_dir).load()
+        ds_full = xr.open_dataset(out_path).load()
         ds_full.close()
         # append along diff values for step
         ds_new = xr.Dataset.from_dict(self.ds_storage)
@@ -341,8 +331,10 @@ class Inversion:
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
         # ds.to_netcdf(out_dir)  # , append_dim="step")
 
-        ds.to_netcdf(out_dir, compute=False)
+        ds.to_netcdf(out_path, compute=False)
         # futures = client.compute(values)
+
+        #
         self.ds_storage["coords"]["step"]["data"] += self.n_chunk
 
         """
@@ -356,8 +348,68 @@ class Inversion:
             # )  # , coords="step")
 
             ds.to_netcdf(out_dir)  # , append_dim="step")
-            """
+        """
         # clear stored results after saving.
+
+    def get_probable_model(self, out_path, n_bins=100):
+        """
+        don't include burn in when computing most probable model.
+        read in file to use all saved samples.
+
+        :param out_dir:
+        :param n_bins:
+        """
+        # *** change later to use context manager ***
+        ds_full = xr.open_dataset(out_path).load()
+        ds_full.close()
+
+        # get the most probable model params
+        model_params = ds_full["model_params"]
+
+        prob_params = np.empty(self.model_params.n_model_params)
+        for p_ind in range(self.model_params.n_model_params):
+            # loop over each model param and find most proable value
+            counts, bins = np.histogram(model_params[p_ind], bins=n_bins, density=True)
+            ind = np.argmax(counts)
+            prob_value = (bins[ind] + bins[ind + 1]) / 2
+            prob_params[p_ind] = prob_value
+
+        # *** need to generalize for param types ***
+        # assemble velocity model
+        velocity_model = self.model_params.get_velocity_model(prob_params)
+        # run forward problem to get predicted data for most probable model
+        data_pred = self.model_params.forward_model(self.data.periods, velocity_model)
+
+        # save probable params and data pred
+        prob_dict = {
+            "coords": {
+                "period": {"dims": "period", "data": self.data.periods},
+                "n_model_params": {
+                    "dims": "n_model_params",
+                    "data": np.arange(self.model_params.n_model_params),
+                },
+            },
+            "data_vars": {
+                "prob_params": {
+                    "dims": ["n_model_params"],
+                    "data": prob_params,
+                },
+                "data_prob": {
+                    "dims": ["period"],
+                    "data": data_pred,
+                },
+            },
+        }
+
+        ds_full["prob_params"] = ("n_model_params", prob_params)
+        ds_full["data_prob"] = ("period", data_pred)
+
+        # save to file
+        # append along diff values for step
+        # ds_new = xr.Dataset.from_dict(self.ds_storage)
+
+        # ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
+        ds_full.to_netcdf(out_path, compute=False)
 
     def perform_tempering_swap(self):
         """
@@ -396,43 +448,3 @@ class Inversion:
                 # if beta is 1, this is the master chain?
                 if beta_1 == 1 or beta_2 == 1:
                     self.swap_prop += 1
-
-    def check_convergence(self, n_step, hist_conv, out_dir):
-        """
-        check if the model has converged.
-
-        :param n_step: number of mcmc steps that have happened.
-        :hist_conv: value determining model convergence.
-        :out_dir: path for where to save results.
-        """
-        # do at least n_rot steps after starting rotation before model can converge
-        enough_rotations = n_step > (self.n_burn + self.n_rot)
-
-        """
-        Check convergence for one chain, and for any number.
-        """
-
-        # *** validate. i think this is finding convergence for 2 chains. i want to generalize this. ***
-        # find the max of abs of the difference between 2 models, right now hard-coded for 2 chains
-        hist_diff = (
-            np.abs(
-                self.chains[0].model_hist / self.chains[0].model_hist.max()
-                - self.chains[1].model_hist / self.chains[1].model_hist.max()
-            )
-        ).max()
-
-        if (hist_diff < hist_conv) & enough_rotations:
-            # store the samples up to the convergence.
-            n_samples = (n_step - self.n_burn) % self.n_keep
-            self.store_samples(
-                hist_diff,
-                n_step,
-                n_samples,
-                out_dir,
-                write_samples=True,
-            )
-
-            # model has converged.
-            sys.exit("Converged, terminate.")
-
-        return hist_diff

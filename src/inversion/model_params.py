@@ -1,6 +1,7 @@
 import numpy as np
 from disba import PhaseDispersion
 from disba._exception import DispersionError
+import xarray as xr
 
 np.complex_ = np.complex64
 
@@ -37,13 +38,19 @@ class DispersionCurveParams(ModelParams):
         self.nuissance_params = np.empty(self.n_nuissance_params)
 
         # model parameter inds
-        self.thickness_inds = np.arange(self.n_layers)
-        self.vel_s_inds = np.arange(self.n_layers, 2 * self.n_layers + 1)
+        self.thickness_inds = np.full(self.n_model_params, False)
+        self.thickness_inds[np.arange(self.n_layers)] = True
+
+        self.vel_s_inds = np.full(self.n_model_params, False)
+        self.vel_s_inds[np.arange(self.n_layers, 2 * self.n_layers + 1)] = True
+
+        """
         # nuissance parameter inds
         self.vel_p_inds = np.arange(self.n_nuissance_params)
         self.density_inds = np.arange(
             self.n_nuissance_params, 2 * self.n_nuissance_params
         )
+        """
 
         # used by inversion to define dataset for storing parameters
         # for defining the dataset, need the names and size of the params
@@ -59,6 +66,34 @@ class DispersionCurveParams(ModelParams):
                 "inds": self.vel_s_inds,
             },
         }
+
+    def get_model_params_dict(self):
+        model_params_dict = {
+            "coords": {
+                "n_model_params": {
+                    "dims": ["n_model_params"],
+                    "data": np.arange(self.n_model_params),
+                },
+            },
+            "data_vars": {},
+            "attrs": {
+                "n_layers": self.n_layers,
+                "vpvs_ratio": self.vpvs_ratio,
+                "thickness_bounds": self.param_bounds["thickness"],
+                "vel_s_bounds": self.param_bounds["vel_s"],
+                "thickness_posterior_width": self.posterior_width["thickness"],
+                "vel_s_posterior_width": self.posterior_width["vel_s"],
+            },
+        }
+
+        # dimension could be n_model_params
+        # change in def
+        for key, val in self.params_info.items():
+            model_params_dict["data_vars"].update(
+                {key + "_inds": {"dims": ["n_model_params"], "data": val["inds"]}}
+            )
+
+        return model_params_dict
 
     # functions to compute nuissance params from model params
     def get_vel_p(self, vel_s):

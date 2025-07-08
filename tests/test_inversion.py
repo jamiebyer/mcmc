@@ -1,7 +1,7 @@
 import pytest
 import numpy as np
 
-from plotting.plot_inversion import *
+from plotting.plot_dispersion_curve import *
 import matplotlib.pyplot as plt
 import xarray as xr
 import os
