@@ -39,6 +39,10 @@ def setup_data(model_params, sigma_data):
 # TESTING BAYESIAN INVERSION
 
 
+def test_layer_swap():
+    pass
+
+
 def test_acceptance_criteria():
     # try proposing a model out of bounds
     # rejection records the same model twice

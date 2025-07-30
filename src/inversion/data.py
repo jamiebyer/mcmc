@@ -50,23 +50,24 @@ class FieldData(Data):
 
 
 class SyntheticData(Data):
-    def __init__(self, periods, sigma_data, model_params, thickness, vel_s):
+    def __init__(self, periods, sigma_data, model_params_obj, depth, vel_s):
         """ """
-        params = np.array(thickness + vel_s)
-        velocity_model = model_params.get_velocity_model(params)
-        data_true, data_obs = self.generate_observed_data(
-            periods, sigma_data, velocity_model
+        data_true, data_obs, model_params = self.generate_observed_data(
+            periods, sigma_data, model_params_obj, depth, vel_s
         )
         self.data_true = data_true
-        self.model_true = params
+        self.model_true = model_params
         super().__init__(periods, data_obs, sigma_data)
 
     def generate_true_model(self, periods, sigma_data, bounds, n_layers):
+        """
+        generating random model
+        """
         valid_params = False
         while not valid_params:
-            thickness = np.random.uniform(
-                bounds["thickness"][0],
-                bounds["thickness"][1],
+            depth = np.random.uniform(
+                bounds["depth"][0],
+                bounds["depth"][1],
                 n_layers - 1,
             )
             vel_s = np.random.uniform(bounds["vel_s"][0], bounds["vel_s"][1], n_layers)
@@ -74,7 +75,7 @@ class SyntheticData(Data):
             density = np.random.uniform(
                 bounds["density"][0], bounds["density"][1], n_layers
             )
-            velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
+            velocity_model = np.array([list(depth) + [0], vel_p, vel_s, density])
 
             try:
                 pd = PhaseDispersion(*velocity_model)
@@ -86,18 +87,20 @@ class SyntheticData(Data):
         data_true = pd_rayleigh.velocity
         # sigma_data is a percentage, so multiply by true data
         data_obs = data_true + sigma_data * data_true * np.random.randn(len(periods))
-        model_true = np.concatenate((thickness, vel_s))
+        model_true = np.concatenate((depth, vel_s))
 
         return data_true, data_obs, model_true
 
-    def generate_observed_data(self, periods, sigma_data, velocity_model):
-        pd = PhaseDispersion(*velocity_model)
-        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+    def generate_observed_data(
+        self, periods, sigma_data, model_params_obj, depth, vel_s
+    ):
+        model_params = np.array(depth + vel_s)
+        # use forward_model function
+        data_true, model_params = model_params_obj.forward_model(periods, model_params)
 
-        data_true = pd_rayleigh.velocity
         # sigma_data is a percentage, so multiply by true data
         data_obs = data_true + sigma_data * data_true * np.random.randn(len(periods))
-        return data_true, data_obs
+        return data_true, data_obs, model_params
 
     def get_data_dict(self):
         data_dict = super().get_data_dict()

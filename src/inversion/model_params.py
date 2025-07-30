@@ -32,38 +32,24 @@ class DispersionCurveParams(ModelParams):
 
         # get number of parameters
         self.n_model_params = (2 * self.n_layers) + 1
-        self.n_nuissance_params = 2 * self.n_layers
-
         self.model_params = np.empty(self.n_model_params)
-        self.nuissance_params = np.empty(self.n_nuissance_params)
 
         # model parameter inds
-        self.thickness_inds = np.full(self.n_model_params, False)
-        self.thickness_inds[np.arange(self.n_layers)] = True
+        self.depth_inds = np.full(self.n_model_params, False)
+        self.depth_inds[np.arange(self.n_layers)] = True
 
         self.vel_s_inds = np.full(self.n_model_params, False)
         self.vel_s_inds[np.arange(self.n_layers, 2 * self.n_layers + 1)] = True
 
-        """
-        # nuissance parameter inds
-        self.vel_p_inds = np.arange(self.n_nuissance_params)
-        self.density_inds = np.arange(
-            self.n_nuissance_params, 2 * self.n_nuissance_params
-        )
-        """
-
         # used by inversion to define dataset for storing parameters
         # for defining the dataset, need the names and size of the params
         # and with inds
-        # with this, are the inds needed anywhere else?
         self.params_info = {
-            "thickness": {
-                "n_params": n_layers,
-                "inds": self.thickness_inds,
-            },
+            "depth": {"n_params": n_layers, "inds": self.depth_inds, "units": "km"},
             "vel_s": {
                 "n_params": n_layers + 1,
                 "inds": self.vel_s_inds,
+                "units": "km/s",
             },
         }
 
@@ -79,9 +65,9 @@ class DispersionCurveParams(ModelParams):
             "attrs": {
                 "n_layers": self.n_layers,
                 "vpvs_ratio": self.vpvs_ratio,
-                "thickness_bounds": self.param_bounds["thickness"],
+                "depth_bounds": self.param_bounds["depth"],
                 "vel_s_bounds": self.param_bounds["vel_s"],
-                "thickness_posterior_width": self.posterior_width["thickness"],
+                "depth_posterior_width": self.posterior_width["depth"],
                 "vel_s_posterior_width": self.posterior_width["vel_s"],
             },
         }
@@ -109,7 +95,7 @@ class DispersionCurveParams(ModelParams):
         # reshape bounds to be the same shape as params
         param_bounds = np.concatenate(
             (
-                [self.param_bounds["thickness"]] * self.n_layers,
+                [self.param_bounds["depth"]] * self.n_layers,
                 [self.param_bounds["vel_s"]] * (self.n_layers + 1),
             ),
             axis=0,
@@ -123,37 +109,40 @@ class DispersionCurveParams(ModelParams):
 
     def assemble_posterior_width(self):
         """
-        from sigma for each param.
+        from -- for each param.
         """
         posterior_width = np.concatenate(
             (
-                [self.posterior_width["thickness"]] * self.n_layers,
+                [self.posterior_width["depth"]] * self.n_layers,
                 [self.posterior_width["vel_s"]] * (self.n_layers + 1),
             ),
             axis=0,
         )
-
         return posterior_width
 
-    def get_velocity_model(self, model_params):
-        """
-        assemble params into the format of velocity model used by the forward model.
-        needs to work for getting velocity model for test parameters.
-        not static because get_vel_p requires vpvs_ratio.
-        """
-        thickness = model_params[self.thickness_inds]
-        vel_s = model_params[self.vel_s_inds]
-        vel_p = self.get_vel_p(vel_s)
-        density = self.get_density(vel_p)
+    def validate_physics(self):
+        return True
 
-        # *** pre-allocate space here ***
-        # have variable for velocity model with pre-allocated space
-        # avoid converting thickness back and forth from list
-        velocity_model = np.array([list(thickness) + [0], vel_p, vel_s, density])
+    def sort_layers(self, depths, params):
+        """"""
+        # generated params are depths of interfaces
+        # sort depths and corresponding params (vel_s)
+        # one of the layers will never move
+        # define depths with interface at z=0
 
-        return velocity_model
+        depths = np.concatenate(([0], depths))
+        inds = np.argsort(depths)
+        depths = depths[inds]
+        params = params[inds]
 
-    def forward_model(self, periods, velocity_model):
+        # positive or negative perturbation
+
+        # get thicknesses
+        thickness = np.concatenate((depths[1:] - depths[:-1], [0]))
+
+        return thickness, depths[1:], params
+
+    def forward_model(self, periods, model_params):
         """
         get phase dispersion curve for current shear velocities and layer thicknesses.
 
@@ -163,8 +152,24 @@ class DispersionCurveParams(ModelParams):
         :param model_params: model params to use to get phase dispersion
 
         """
-        # assemble params into velocity model
+        # *** it doesn't really make sense to return the updated model_params
+        # maybe think of something better later. ***
 
+        # sort layers
+        depth = model_params[self.depth_inds]
+        vel_s = model_params[self.vel_s_inds]
+
+        thickness, depth, vel_s = self.sort_layers(depth, vel_s)
+        model_params[self.depth_inds] = depth
+        model_params[self.vel_s_inds] = vel_s
+
+        # assemble params into velocity model
+        vel_p = self.get_vel_p(vel_s)
+        density = self.get_density(vel_p)
+        # avoid converting thickness back and forth from list
+        velocity_model = np.array([thickness, vel_p, vel_s, density])
+
+        # phase dispersion object
         pd = PhaseDispersion(*velocity_model)
 
         # try calculating phase_velocity from given params.
@@ -172,7 +177,7 @@ class DispersionCurveParams(ModelParams):
             pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
             phase_velocity = pd_rayleigh.velocity
 
-            return phase_velocity
+            return phase_velocity, model_params
         except (DispersionError, ZeroDivisionError) as e:
             # *** track the type of error ***
             # failed to find root for fundamental mode

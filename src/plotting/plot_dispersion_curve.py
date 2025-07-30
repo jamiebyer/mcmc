@@ -18,6 +18,9 @@ def model_params_timeseries(input_ds, results_ds):
     """
     # use input_ds to interpret results_ds
 
+    # cut results by step
+    results_ds = results_ds.isel(step=slice(input_ds.attrs["n_burn"], len(results_ds)))
+
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
     step = results_ds["step"]
@@ -27,12 +30,12 @@ def model_params_timeseries(input_ds, results_ds):
     # get most probable model from ds_results
     probable_model = results_ds["prob_params"]
 
-    param_types = ["thickness", "vel_s"]
+    param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
 
-    # one column for thickness, one for vel_s, one for likelihood and acceptance
-    # n_layers = input_ds["n_layers"]
-    n_layers = 2
+    # one column for depth, one for vel_s, one for likelihood and acceptance
+    n_layers = input_ds.attrs["n_layers"]
+
     fig, ax = plt.subplots(nrows=n_layers + 1, ncols=n_param_types + 1)
 
     # loop over all params and plot
@@ -41,7 +44,7 @@ def model_params_timeseries(input_ds, results_ds):
     for c_ind, param in enumerate(param_types):
         inds = input_ds[param + "_inds"]
         for r_ind, p in enumerate(model_params[inds]):
-            legend.append(param + " " + str(r_ind))
+            legend.append(param + " " + str(r_ind + 1))
             # param timeseries
             ax[r_ind, c_ind].scatter(
                 step,
@@ -71,11 +74,13 @@ def model_params_timeseries(input_ds, results_ds):
     ax[1, -1].set_xlabel("step")
     ax[1, -1].set_ylabel("acceptance rate")
 
+    """
     # error rate
     ax[2, -1].plot(step, results_ds["err_ratio"].T)
     ax[2, -1].legend(legend)
     ax[2, -1].set_xlabel("step")
-    ax[2, -1].set_ylabel("error rate")
+    ax[2, -1].set_ylabel("error ratio")
+    """
 
     # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
@@ -96,6 +101,9 @@ def model_params_histogram(input_ds, results_ds, n_bins=100):
     """
     # use input_ds to interpret results_ds
 
+    # cut results by step
+    results_ds = results_ds.isel(step=slice(input_ds.attrs["n_burn"], len(results_ds)))
+
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
 
@@ -104,50 +112,59 @@ def model_params_histogram(input_ds, results_ds, n_bins=100):
     # get most probable model from ds_results
     probable_model = results_ds["prob_params"]
 
-    param_types = ["thickness", "vel_s"]
+    param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
 
-    # one column for thickness, one for vel_s, one for likelihood and acceptance
-    # n_layers = input_ds["n_layers"]
-    n_layers = 2
+    # one column for depth, one for vel_s
+    n_layers = input_ds.attrs["n_layers"]
     fig, ax = plt.subplots(nrows=n_layers + 1, ncols=n_param_types)
 
     # loop over all params and plot
     # use param inds to get param name
     for c_ind, param in enumerate(param_types):
+        unit_scale = 1
+        if param == "depth":
+            unit_scale = 1000  # unit conversion to m
         inds = input_ds[param + "_inds"]
-        bins = np.linspace(
+        bins = unit_scale * np.linspace(
             input_ds.attrs[param + "_bounds"][0],
             input_ds.attrs[param + "_bounds"][1],
             n_bins,
         )
+
         for r_ind, p in enumerate(model_params[inds]):
-            if param == "thickness":
-                p *= 1000  # unit conversion to m
             # param timeseries
-            ax[r_ind, c_ind].hist(p, bins=bins, density=True)
+            ax[r_ind, c_ind].hist(unit_scale * p, bins=bins, density=True)
             # true model
-            ax[r_ind, c_ind].axvline(true_model[inds][r_ind], c="red")
+            ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
             # most probable model
-            ax[r_ind, c_ind].axvline(probable_model[inds][r_ind], c="purple")
+            ax[r_ind, c_ind].axvline(
+                unit_scale * probable_model[inds][r_ind], c="purple"
+            )
             # bounds
-            ax[r_ind, c_ind].axvline(input_ds.attrs[param + "_bounds"][0], c="black")
-            ax[r_ind, c_ind].axvline(input_ds.attrs[param + "_bounds"][1], c="black")
+            ax[r_ind, c_ind].axvline(
+                unit_scale * input_ds.attrs[param + "_bounds"][0], c="black"
+            )
+            ax[r_ind, c_ind].axvline(
+                unit_scale * input_ds.attrs[param + "_bounds"][1], c="black"
+            )
 
             # axis labels
             ax[r_ind, c_ind].set_xlabel(param + " " + str(r_ind + 1))
-            # ax[r_ind, c_ind].set_ylabel("count")
 
     # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
     plt.show()
 
 
-def resulting_model_histogram(input_ds, results_ds):
+def resulting_model_histogram(input_ds, results_ds, n_bins=100):
     """
     plot the resulting model as velocity vs. depth
-    with the histogram of probability for the thickness of the layer
+    with the histogram of probability for the depth of the layer
     """
+    # cut results by step
+    results_ds = results_ds.isel(step=slice(input_ds.attrs["n_burn"], len(results_ds)))
+
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
 
@@ -155,11 +172,10 @@ def resulting_model_histogram(input_ds, results_ds):
     true_params = input_ds["model_true"].values
 
     # define hist bins between bounds
-    n_bins = 100
-    thickness_bins = (
+    depth_bins = (
         np.linspace(
-            input_ds.attrs["thickness_bounds"][0],
-            input_ds.attrs["thickness_bounds"][1],
+            input_ds.attrs["depth_bounds"][0],
+            input_ds.attrs["depth_bounds"][1],
             n_bins,
         )
         * 1000
@@ -170,55 +186,52 @@ def resulting_model_histogram(input_ds, results_ds):
     counts = np.zeros((n_bins, n_bins))
 
     # loop over every resulting model
-    # add vel_s 1 to hist bins above thickness
-    # add vel_s 2 to hist bins below thickness
+    # add vel_s 1 to hist bins above depth
+    # add vel_s 2 to hist bins below depth
 
-    thickness_inds = input_ds["thickness_inds"]
+    depth_inds = input_ds["depth_inds"]
     vel_s_inds = input_ds["vel_s_inds"]
 
     n_steps = len(results_ds["step"])
 
-    thickness = model_params[thickness_inds] * 1000  # unit conversion to m
-    true_thickness = true_params[thickness_inds] * 1000
-
-    thickness_plotting = np.concatenate(
+    depth = model_params[depth_inds] * 1000  # unit conversion to m
+    depth_plotting = np.concatenate(
         (
             np.zeros((1, n_steps)),
-            thickness,
-            np.full((1, n_steps), input_ds.attrs["thickness_bounds"][1]),
+            depth,
+            np.full((1, n_steps), input_ds.attrs["depth_bounds"][1]),
         ),
         axis=0,
     )
-    true_thickness_plotting = np.concatenate(([0], true_thickness))
-
     vel_s = model_params[vel_s_inds]
-    true_vel_s = true_params[vel_s_inds]
 
     # for each layer
     # for each sample / step
-    total_thickness = np.cumsum(thickness_plotting, axis=0)
     for layer_ind in range(input_ds.attrs["n_layers"] + 1):
         for step_ind in range(n_steps):
-            # find bin index closest to layer thickness
-            thickness_upper_inds = np.argmin(
-                abs(thickness_bins - total_thickness[layer_ind, step_ind])
+            # find bin index closest to layer depth
+            depth_upper_inds = np.argmin(
+                abs(depth_bins - depth_plotting[layer_ind, step_ind])
             )
-            thickness_lower_inds = np.argmin(
-                abs(thickness_bins - total_thickness[layer_ind + 1, step_ind])
+            depth_lower_inds = np.argmin(
+                abs(depth_bins - depth_plotting[layer_ind + 1, step_ind])
             )
             # find bin index closest to layer vel_s
-            vel_s_inds = np.argmin(abs(vel_s_bins - vel_s[layer_ind, step_ind]))
+            vel_s_close_inds = np.argmin(abs(vel_s_bins - vel_s[layer_ind, step_ind]))
 
-            counts[thickness_upper_inds:thickness_lower_inds, vel_s_inds] += 1
+            counts[depth_upper_inds:depth_lower_inds, vel_s_close_inds] += 1
+
+    # plot true model overtop
+    true_depth = true_params[depth_inds] * 1000
+    true_vel_s = true_params[vel_s_inds]
+    true_depth_plotting = np.concatenate(
+        ([0], true_depth, [input_ds.attrs["depth_bounds"][1] * 1000])
+    )
 
     true_model = []
-    true_total_thickness = np.cumsum(true_thickness_plotting)
-    true_total_thickness = np.concatenate(
-        (true_total_thickness, [input_ds.attrs["thickness_bounds"][1] * 1000])
-    )
     for layer_ind in range(input_ds.attrs["n_layers"] + 1):
-        true_model.append([true_total_thickness[layer_ind], true_vel_s[layer_ind]])
-        true_model.append([true_total_thickness[layer_ind + 1], true_vel_s[layer_ind]])
+        true_model.append([true_depth_plotting[layer_ind], true_vel_s[layer_ind]])
+        true_model.append([true_depth_plotting[layer_ind + 1], true_vel_s[layer_ind]])
 
     fig = plt.figure()
     gs = GridSpec(1, 3, figure=fig)
@@ -230,7 +243,7 @@ def resulting_model_histogram(input_ds, results_ds):
     h = ax1.imshow(
         counts,
         norm=LogNorm(),
-        extent=[vel_s_bins[0], vel_s_bins[-1], thickness_bins[-1], thickness_bins[0]],
+        extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
         aspect="auto",
     )
 
@@ -242,18 +255,20 @@ def resulting_model_histogram(input_ds, results_ds):
     ax1.set_xlabel("vel s (km/s)")
     ax1.set_ylabel("depth (m)")
 
-    # plot thickness histogram
-    total_thickness = np.cumsum(thickness, axis=0)
+    # plot depth histogram
     for ind in range(input_ds.attrs["n_layers"]):
         ax2.hist(
-            total_thickness[ind],
-            bins=thickness_bins,
+            depth[ind],
+            bins=depth_bins,
             density=True,
             orientation="horizontal",
         )
 
     ax2.set_ylim(
-        [input_ds.attrs["thickness_bounds"][0], input_ds.attrs["thickness_bounds"][1]]
+        [
+            input_ds.attrs["depth_bounds"][0] * 1000,
+            input_ds.attrs["depth_bounds"][1] * 1000,
+        ]
     )
     plt.gca().invert_yaxis()
 
@@ -263,21 +278,22 @@ def resulting_model_histogram(input_ds, results_ds):
     plt.show()
 
 
-def plot_data_pred_histogram(input_ds, results_ds, n_bins=50):
-    """ """
+def plot_data_pred_histogram(input_ds, results_ds, n_bins=100):
+    """
+    plot all data predictions as a histogram.
+    plot true data, observed data, and predicted data for the most probable model.
+    """
+    # cut results by step
+    results_ds = results_ds.isel(step=slice(input_ds.attrs["n_burn"], len(results_ds)))
+
     fig, ax = plt.subplots()
     freqs = 1 / input_ds["period"]
 
-    plt.plot(freqs, input_ds["data_true"], zorder=5)
-
-    # yerr = input_ds.attrs["sigma_data"] * input_ds["data_obs"]
-    # plt.errorbar(freqs, input_ds["data_true"], yerr, marker="o")
-    plt.scatter(freqs, input_ds["data_obs"], zorder=5)
-
+    plt.plot(freqs, input_ds["data_true"], zorder=3)
+    plt.scatter(freqs, input_ds["data_obs"], zorder=3)
     # estimated error
     yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
-    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=5)
-    # plt.scatter(results_ds["period"], results_ds["data_prob"], zorder=5)
+    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3)
 
     # flatten data_pred, repeat period
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])

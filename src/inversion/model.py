@@ -14,11 +14,10 @@ class Model:
         beta=None,
     ):
         """
-        :param beta: inverse temperature; larger values explore less of the parameter space,
-            but are more precise; between 0 and 1
+        :param model_params:
+        :param sigma_data:
+        :param beta:
         """
-        # initialize
-
         self.logL = None
         self.data_pred = None
 
@@ -29,27 +28,28 @@ class Model:
         self.param_bounds = model_params.assemble_param_bounds()
         self.posterior_width = model_params.assemble_posterior_width()
 
+        n_params = self.model_params.n_model_params
+
         # acceptance ratio for each parameter
-        self.swap_acc = np.zeros(self.model_params.n_model_params)
-        self.swap_rej = np.zeros(self.model_params.n_model_params)
-        self.swap_err = np.zeros(self.model_params.n_model_params)
+        # model params will have specific forward model error conditions...
+        self.acceptance_rate = {
+            # "n_prop": np.zeros(n_params),  # proposed
+            "n_acc": np.zeros(n_params),  # accepted
+            "n_rej": np.zeros(n_params),  # rejected
+            "n_fm_err": np.zeros(n_params),  # forward model error
+            "n_hs_err": np.zeros(n_params),  # half-space error
+            "acc_rate": np.zeros(n_params),
+            "fm_err_ratio": np.zeros(n_params),
+            "fm_hs_ratio": np.zeros(n_params),
+        }
 
         self.beta = beta
 
-        """
+        self.cov_mat = np.zeros((n_params, n_params))
+
         # variables for storing and computing covariance matrix after burn-in
-        self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
-        self.n_cov = 0  # initialize the dividing number for covariance
-        self.mean_model = np.zeros(self.n_params)
-        self.mean_model_sum = np.zeros((self.n_params))
-        # initialize covariance matrix
-        self.cov_mat = np.zeros((self.n_params, self.n_params))
-        self.cov_mat_sum = np.zeros((self.n_params, self.n_params))
-        
-        # initialize histogram of model parameters
-        self.n_bins = n_bins
-        self.model_hist = np.zeros((self.n_params, n_bins + 1))
-        """
+        # self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
+        # self.n_cov = 0  # initialize the dividing number for covariance
 
     def validate_bounds(self, model_params, ind):
         """
@@ -62,86 +62,24 @@ class Model:
         )
         return valid_params
 
-    def generate_model_params(self, param_bounds):
+    def generate_model_params(self):
         """
         generating initial params for new model.
+        uniform between bounds
         """
-        # only for thickness and shear velocity, compute for vel_p and density
         model_params = np.random.uniform(
-            param_bounds[:, 0], param_bounds[:, 1], self.n_params
+            self.param_bounds[:, 0],
+            self.param_bounds[:, 1],
+            self.model_params.n_model_params,
         )
 
         return model_params
-
-    def get_optimization_model(
-        self,
-        param_bounds,
-        data,
-        T_0=100,
-        epsilon=0.95,
-        ts=100,
-        n_steps=1000,
-    ):
-        """
-        :param T_0: initial temp
-        :param epsilon: decay factor of temperature
-        :param ts: number of temperature steps
-        :param n_steps: number of balancing steps at each temp
-        """
-
-        temps = np.zeros(ts)
-        temps[0] = T_0
-
-        for k in range(1, ts):
-            temps[k] = temps[k - 1] * epsilon
-
-        # temps = np.ones(ts)
-
-        results = {
-            "temps": [],  # temps,
-            # "params": [],
-            "thickness": [],
-            "vel_s": [],
-            "vel_p": [],
-            "density": [],
-            "logL": [],
-        }
-
-        # reduce logarithmically
-        for T in temps:
-            print("\ntemp", T)
-            # number of steps at this temperature
-            for _ in range(n_steps):
-                print(_)
-                # perturb each parameter
-                # if using the perturb params function, it does the acceptance rate stats in the function
-                self.perturb_params(param_bounds, data, T=T)
-
-                results["temps"].append(T)
-                results["thickness"].append(self.thickness.copy())
-                results["vel_s"].append(self.vel_s.copy())
-                results["vel_p"].append(self.vel_p.copy())
-                results["density"].append(self.density.copy())
-                results["logL"].append(self.logL)
-
-        df = pd.DataFrame(results)
-        df.to_csv("./results/inversion/optimize_model.csv")
-
-    def stepsize_tuning():
-        """
-        Step size can be found by trial and error.
-        This is sometimes done during burn in, where we target an acceptance rate of ~30%.
-        When a << 30%, decrease step size; when a>>30%, increase step size.
-        Once an acceptable step size it found, stop adapting.
-        Sometimes, we do this by way of diminishing adaptation (see Rosenthal in Handbook of MCMC).
-        Adapt the step size less and less as the sampler progresses, until adaptation vanishes.
-        """
-        pass
 
     def perturb_params(
         self,
         data,
         proposal_distribution,
+        n_step,
         T=1,
         sample_prior=False,
     ):
@@ -149,7 +87,10 @@ class Model:
         loop over each model parameter, perturb its value, validate the value,
         calculate likelihood, and accept the new model with a probability.
 
-        :param scale_factor:
+        :param data:
+        :param proposal_distribution:
+        :param T:
+        :param sample_prior:
         """
         # can normalize
 
@@ -173,67 +114,158 @@ class Model:
                 * np.tan(np.pi * (np.random.uniform() - 0.5))
             )
 
-        # assemble test params and check bounds
-        test_model = self.model_params.get_velocity_model(test_model_params)
-
         # check bounds
         valid_params = self.validate_bounds(test_model_params, ind)
 
+        acc = False
         if valid_params:
+            # assemble test params and check bounds
+
+            # run forward model
+
             # check acceptance criteria
-            acc = self.acceptance_criteria(
-                test_model, ind, data, sample_prior=sample_prior, T=T
+            acc, test_model_params = self.acceptance_criteria(
+                test_model_params, ind, data, sample_prior=sample_prior, T=T
             )
+
             if acc:
                 self.model_params.model_params = test_model_params.copy()
-                self.swap_acc[ind] += 1
-            else:
-                self.swap_rej[ind] += 1
-        else:
-            self.swap_rej[ind] += 1
 
-    def acceptance_criteria(self, test_model, ind, data, T, sample_prior):
+        self.update_acceptance_rate(acc, ind)
+        self.stepsize_tuning(n_step)
+
+    def acceptance_criteria(self, test_model_params, ind, data, T, sample_prior):
+        """
+        determine whether to accept the test model parameters.
+        for sampling the prior, always accept the new parameters.
+
+        Run the forward model with the test parameters to validate parameters, and
+        to get predicted data from this model. Compute likelihood. Use metropolis-hastings
+        acceptance criteria to accept / reject based on model likelihood.
+
+        :param test_model_params:
+        :param ind:
+        :param data:
+        :param T:
+        :param sample_prior:
+        """
         if sample_prior:
-            logL_new, data_pred_new = 1, np.empty(data.n_data)
+            # for testing and sampling the prior, return perfect likelihood and empty data.
+            logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
+        elif not self.model_params.validate_physics():
+            # check that halfspace is the fastest layer
+            # check specific criteria for params
+            self.model_params.validate_physics()
+            self.acceptance_rate["n_hs_err"][ind] += 1
         else:
             try:
-                logL_new, data_pred_new = self.get_likelihood(test_model, data)
+                logL_new, data_pred_new, model_params = self.get_likelihood(
+                    test_model_params, data
+                )
             except (DispersionError, ZeroDivisionError):
                 # add specific condition here for failed forward model
-                self.swap_err[ind] += 1
-                return False
+                self.acceptance_rate["n_fm_err"][ind] += 1
+                return False, None
 
         # Compute likelihood ratio in log space
         # T=1 by default, unless performing optimization inversion
         dlogL = logL_new - self.logL
         dlogL = dlogL / T
 
-        # Apply MH criterion (accept/reject)
+        # Apply Metropolis-Hastings criterion (accept/reject)
         xi = np.random.uniform()  # between 0 and 1
         if xi <= np.exp(dlogL):
             self.logL = logL_new
             self.data_pred = data_pred_new
-            return True
+            return True, model_params
         else:
-            return False
+            return False, model_params
 
-    def get_likelihood(self, velocity_model, data):
+    def update_acceptance_rate(self, acc, ind):
         """
-        :param model_params: params to calculate likelihood with
+        update acceptance rate.
+        make sure no division by zero.
+
+        :param acc: boolean for whether perturbed parameter is accepted.
+        :paran ind: index of parameter to update.
         """
-        # return 1, periods
+        if acc:
+            self.acceptance_rate["n_acc"][ind] += 1
+        else:
+            self.acceptance_rate["n_rej"][ind] += 1
+
+        if self.acceptance_rate["n_rej"][ind] > 0:
+            self.acceptance_rate["acc_rate"][ind] = self.acceptance_rate["n_acc"][
+                ind
+            ] / (
+                self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
+            )
+
+    def get_likelihood(self, model_params, data):
+        """
+        :param velocity_model:
+        :param data:
+        """
         try:
-            data_pred = self.model_params.forward_model(data.periods, velocity_model)
+            data_pred, model_params = self.model_params.forward_model(
+                data.periods, model_params
+            )
             residuals = data.data_obs - data_pred
-            # for identical errors
-            # logL = np.sum(residuals**2) / (self.sigma_model**2)
 
             # cov_inv = data.data_cov
             # cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
-            logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
             # logL = residuals.T @ cov_inv @ residuals
 
-            return logL, data_pred
+            # for identical errors
+            logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
+
+            return logL, data_pred, model_params
 
         except (DispersionError, ZeroDivisionError) as e:
             raise e
+
+    def stepsize_tuning(self, n_step):
+        """
+        Step size can be found by trial and error.
+        This is sometimes done during burn in, where we target an acceptance rate of ~30%.
+        When a << 30%, decrease step size; when a >> 30%, increase step size.
+        Once an acceptable step size it found, stop adapting.
+        Sometimes, we do this by way of diminishing adaptation (see Rosenthal in Handbook of MCMC).
+        Adapt the step size less and less as the sampler progresses, until adaptation vanishes.
+        """
+
+        # tune parameter scales using acceptance rate
+        # update scale
+        acc_optimal = 0.3
+        # acc_optimal = 0.234
+
+        # gamma = np.linspace(1, 0, 10000)
+        gamma = 1 / (n_step + 1)
+        """
+        self.posterior_width = np.exp(
+            np.log(self.posterior_width) + gamma * (acc_rate - acc_optimal)
+        )
+        """
+        # if the acceptance rate is too high, increase the step size
+        # if the acceptance rate is too low, decrease the step size
+        # adapt the acceptance rate less and less as more steps are taken
+        # diff = np.abs(acc_rate - acc_optimal)
+        high_inds = self.acceptance_rate["acc_rate"] > 0.4
+        low_inds = self.acceptance_rate["acc_rate"] < 0.2
+        self.posterior_width[high_inds] = (
+            self.posterior_width[high_inds] * 0.9
+        )  # gamma*diff
+        self.posterior_width[low_inds] = self.posterior_width[low_inds] * 1.1
+
+    def update_covariance_matrix(self, n_step):
+        # need prev matrix to compute current.
+        # subtract prev mean cov and current mean cov mat.
+
+        # update mean params
+        self.mean_params = (1 / n_step) * (
+            ((n_step - 1) / n_step) * (self.mean_params)
+            + self.model_params.model_params
+        )
+        self.cov_mat = (1 / n_step) * (
+            np.sum(self.model_params.model_params - self.mean_params) ** 2
+        )

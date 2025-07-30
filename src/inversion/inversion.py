@@ -93,6 +93,8 @@ class Inversion:
         input_dict["attrs"].update(m_dict["attrs"])
         input_dict["attrs"].update(d_dict["attrs"])
 
+        input_dict["attrs"]["n_burn"] = self.n_burn
+
         input_dict["dims"] = {
             k: len(v["data"]) for k, v in input_dict["coords"].items()
         }
@@ -136,7 +138,11 @@ class Inversion:
                     "dims": ["n_model_params", "step"],
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
-                "err_ratio": {
+                "fm_err": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "hs_err": {
                     "dims": ["n_model_params", "step"],
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
@@ -146,6 +152,47 @@ class Inversion:
                 },
             },
         }
+
+    def get_optimization_model(
+        self,
+        param_bounds,
+        data,
+        T_0=100,
+        epsilon=0.95,
+        ts=100,
+        n_steps=1000,
+    ):
+        """
+        :param T_0: initial temp
+        :param epsilon: decay factor of temperature
+        :param ts: number of temperature steps
+        :param n_steps: number of balancing steps at each temp
+        """
+
+        temps = np.zeros(ts)
+        temps[0] = T_0
+
+        for k in range(1, ts):
+            temps[k] = temps[k - 1] * epsilon
+
+        # need to add temp to saving dataset.
+
+        # self.define_input_dataset()
+        self.define_results_dataset()
+
+        # reduce logarithmically
+        for T in temps:
+            print("\ntemp", T)
+            # number of steps at this temperature
+            for _ in range(n_steps):
+                print(_)
+                # perturb each parameter
+                # if using the perturb params function, it does the acceptance rate stats in the function
+                self.perturb_params(param_bounds, data, T=T)
+
+                self.store_samples()
+
+        self.write_samples()
 
     def get_betas(self, beta_spacing_factor):
         """
@@ -159,6 +206,8 @@ class Inversion:
         # change beta steps vals based on acceptance rate
 
         # *** later could tune beta_spacing_factor as the inversion runs, looking at the acceptance rate every ~10 000 steps ***
+        # :param beta: inverse temperature; larger values explore less of the parameter space,
+        #    but are more precise; between 0 and 1
 
         if self.n_chains == 1:
             return [1]
@@ -183,6 +232,8 @@ class Inversion:
         """
         initialize each of the chains, setting starting parameters, beta values, initial rotation params
 
+        :param model_params:
+        :param sigma_data:
         :param beta_spacing_factor
         """
 
@@ -200,16 +251,13 @@ class Inversion:
             valid_params = False
             while not valid_params:
                 # generate model params between bounds.
-                test_params = np.random.uniform(
-                    low=model.param_bounds[:, 0],
-                    high=model.param_bounds[:, 1],
-                    size=model.model_params.n_model_params,
-                )
+                test_params = model.generate_model_params()
 
-                velocity_model = model.model_params.get_velocity_model(test_params)
-
+                # get likelihood
                 try:
-                    logL, data_pred = model.get_likelihood(velocity_model, self.data)
+                    logL, data_pred, test_params = model.get_likelihood(
+                        test_params, self.data
+                    )
                     valid_params = True
                 except (DispersionError, ZeroDivisionError) as _:
                     valid_params = False
@@ -222,7 +270,6 @@ class Inversion:
 
         self.chains = chains
 
-    # async def random_walk(
     def random_walk(
         self,
         model_params,
@@ -240,15 +287,14 @@ class Inversion:
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
-            burn_in = n_steps < self.n_burn
-
-            delayed_results = []
+            # burn_in = n_steps < self.n_burn
+            delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
-
                 chain_model.perturb_params(
                     self.data,
                     proposal_distribution,
+                    n_steps,
                     sample_prior=sample_prior,
                 )
 
@@ -261,10 +307,9 @@ class Inversion:
                 # tempering exchange move
                 self.perform_tempering_swap()
 
-            if not burn_in:
-                # store every sample; only write to file every n_chunk samples.
-                self.store_samples(n_steps)
-                self.write_samples(n_steps, out_path)
+            # store every sample; only write to file every n_chunk samples.
+            self.store_samples(n_steps)
+            self.write_samples(n_steps, out_path)
 
         # add most probable model to file
         # (and total computation time)
@@ -294,16 +339,18 @@ class Inversion:
 
                 # acceptance rate
                 self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
-                    chain.swap_acc / (chain.swap_acc + chain.swap_rej)
+                    chain.acceptance_rate["n_acc"]
+                    / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
                 )
+                """
                 # error ratio
-                # errors : rejected proposals
-                self.ds_storage["data_vars"]["err_ratio"]["data"][
-                    chain.swap_rej == 0, n_save
-                ] = 0
-                self.ds_storage["data_vars"]["err_ratio"]["data"][
-                    chain.swap_rej != 0, n_save
-                ] = (chain.swap_err / chain.swap_rej)
+                self.ds_storage["data_vars"]["fm_err"]["data"] = chain.acceptance_rate[
+                    "n_fm_err"
+                ] / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
+                self.ds_storage["data_vars"]["hs_err"]["data"] = chain.acceptance_rate[
+                    "n_hs_err"
+                ] / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
+                """
 
     def write_samples(self, n_steps, out_path):
         """
@@ -324,7 +371,8 @@ class Inversion:
         if not write_samples:
             return
 
-        print(str(n_steps) + " / " + str(self.n_mcmc))
+        percent = ((n_steps + 1) / self.n_mcmc) * 100
+        print(str(np.round(percent, 1)) + " %")
 
         # *** change later to use context manager ***
         ds_full = xr.open_dataset(out_path).load()
@@ -343,6 +391,7 @@ class Inversion:
     def write_probable_model(self, out_path, start_time, n_bins=100):
         """
         read in file to use all saved samples.
+        only use samples past burn in to compute most probable model.
 
         :param out_dir:
         :param n_bins:
@@ -352,7 +401,7 @@ class Inversion:
         ds_full.close()
 
         # get the most probable model params
-        model_params = ds_full["model_params"]
+        model_params = ds_full["model_params"][:, self.n_burn :]
 
         prob_params = np.empty(self.model_params.n_model_params)
         for p_ind in range(self.model_params.n_model_params):
@@ -362,33 +411,12 @@ class Inversion:
             prob_value = (bins[ind] + bins[ind + 1]) / 2
             prob_params[p_ind] = prob_value
 
-        # *** need to generalize for param types ***
-        # assemble velocity model
-        velocity_model = self.model_params.get_velocity_model(prob_params)
         # run forward problem to get predicted data for most probable model
-        data_pred = self.model_params.forward_model(self.data.periods, velocity_model)
+        data_pred, prob_params = self.model_params.forward_model(
+            self.data.periods, prob_params
+        )
 
         # save probable params and data pred
-        prob_dict = {
-            "coords": {
-                "period": {"dims": "period", "data": self.data.periods},
-                "n_model_params": {
-                    "dims": "n_model_params",
-                    "data": np.arange(self.model_params.n_model_params),
-                },
-            },
-            "data_vars": {
-                "prob_params": {
-                    "dims": ["n_model_params"],
-                    "data": prob_params,
-                },
-                "data_prob": {
-                    "dims": ["period"],
-                    "data": data_pred,
-                },
-            },
-        }
-
         ds_full["prob_params"] = ("n_model_params", prob_params)
         ds_full["data_prob"] = ("period", data_pred)
 

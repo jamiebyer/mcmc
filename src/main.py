@@ -36,15 +36,14 @@ def run_inversion(
     n_data = 50
     periods = np.flip(1 / np.logspace(0, 1.1, n_data))
 
-    thickness = [0.02, 0.02]
-    # thickness = [0.03, 0.1]
+    depth = [0.02, 0.04]
     vel_s = [0.2, 0.6, 1.0]
 
     data = SyntheticData(
         periods,
         noise,
         model_params,
-        thickness=thickness,
+        depth=depth,
         vel_s=vel_s,
     )
 
@@ -57,20 +56,19 @@ def run_inversion(
     )
 
     if set_starting_model:
+        # *** move to inversion ***
         # set initial model to true model
         model = inversion.chains[0]
-        test_model_params = np.concatenate((thickness, vel_s))
-        velocity_model = model.model_params.get_velocity_model(test_model_params)
-        model.model_params.model_params = test_model_params
+        test_model_params = np.concatenate((depth, vel_s))
 
         # set initial likelihood
-        model.logL, model.data_pred = model.get_likelihood(velocity_model, data)
+        model.logL, model.data_pred, model.model_params.model_params = (
+            model.get_likelihood(test_model_params, data)
+        )
 
-    # run inversion but always accept
     inversion.random_walk(
         model_params,
         **inversion_run_kwargs,
-        sample_prior=sample_prior,
     )
 
 
@@ -83,13 +81,13 @@ if __name__ == "__main__":
 
     sample_prior = False
     proposal_distribution = "cauchy"
-    set_starting_model = True
+    set_starting_model = False
 
     noise = 0.05  # real noise added to synthetic data (percentage)
     sigma_data = 0.05  # assumed noise used in likelihood calculation (percentage)
     posterior_width = {
-        "thickness": 0.1,
-        "vel_s": 0.1,
+        "depth": 1,  # 0.1,
+        "vel_s": 1,  # 0.1,
     }  # fractional step size (multiplied by param bounds width)
 
     # rerun, plot = True, False
@@ -98,7 +96,7 @@ if __name__ == "__main__":
     if rerun:
         # set up data and inversion params
         bounds = {
-            "thickness": [0.001, 0.1],  # km
+            "depth": [0.001, 0.3],  # km
             "vel_s": [0.1, 1.8],  # km/s
         }
         model_params_kwargs = {
@@ -111,7 +109,7 @@ if __name__ == "__main__":
         inversion_init_kwargs = {
             "n_burn": 5000,
             "n_chunk": 500,
-            "n_mcmc": 50000,
+            "n_mcmc": 20000,
             "n_chains": 1,
             "beta_spacing_factor": 1.15,
         }
@@ -127,15 +125,9 @@ if __name__ == "__main__":
             inversion_run_kwargs,
         )
     if plot:
-        # M1:
-        # thickness = [0.03, 0.03]
-        # vel_s = [0.2, 0.6, 1.0]
-        # file_name = "1751994065"  # noise: 0.05, sigma_data: 0.05, thickness_scale: 0.1, vel_s_scale: 0.1
-
-        # M2:
-        # thickness = [0.02, 0.02]
-        # vel_s = [0.2, 0.6, 1.0]
-        file_name = "1751995530"  # noise: 0.05, sigma_data: 0.05, thickness_scale: 0.1, vel_s_scale: 0.1
+        # depth = [0.02, 0.04]
+        # vel_s = [0.2, 1.0, 1.5]
+        file_name = "1753900188"  # noise: 0.05, sigma_data: 0.05, depth_scale: 0.1, vel_s_scale: 0.1
 
         input_path = "./results/inversion/input-" + file_name + ".nc"
         results_path = "./results/inversion/results-" + file_name + ".nc"
@@ -144,8 +136,9 @@ if __name__ == "__main__":
         results_ds = xr.open_dataset(results_path)
 
         print(input_ds)
+        # print(results_ds)
 
         # model_params_timeseries(input_ds, results_ds)
         # model_params_histogram(input_ds, results_ds)
         resulting_model_histogram(input_ds, results_ds)
-        # plot_data_pred_histogram(input_ds, results_ds)
+        plot_data_pred_histogram(input_ds, results_ds)
