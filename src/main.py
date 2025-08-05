@@ -12,13 +12,7 @@ from plotting.plot_dispersion_curve import *
 import xarray as xr
 
 
-def run_inversion(
-    noise,
-    model_params_kwargs,
-    model_kwargs,
-    inversion_init_kwargs,
-    inversion_run_kwargs,
-):
+def run_inversion():
     """
     run tests for:
     - sample prior; uniform
@@ -28,6 +22,40 @@ def run_inversion(
     - generate true model; low noise
     - generate true model; high noise
     """
+
+    sample_prior = False
+    proposal_distribution = "cauchy"
+    set_starting_model = False
+
+    noise = 0.05  # real noise added to synthetic data (percentage)
+    sigma_data = 0.05  # assumed noise used in likelihood calculation (percentage)
+    posterior_width = {
+        "depth": 0.1,
+        "vel_s": 0.1,
+    }  # fractional step size (multiplied by param bounds width)
+
+    # set up data and inversion params
+    bounds = {
+        "depth": [0.001, 0.3],  # km
+        "vel_s": [0.1, 1.8],  # km/s
+    }
+    model_params_kwargs = {
+        "n_layers": 2,
+        "vpvs_ratio": 1.75,
+        "param_bounds": bounds,
+        "posterior_width": posterior_width,
+    }
+    model_kwargs = {"sigma_data": sigma_data}
+    inversion_init_kwargs = {
+        "n_burn": 5000,
+        "n_chunk": 500,
+        "n_mcmc": 20000,
+        "n_chains": 1,
+        "beta_spacing_factor": 1.15,
+    }
+    inversion_run_kwargs = {
+        "proposal_distribution": proposal_distribution,
+    }
 
     # model params
     model_params = DispersionCurveParams(**model_params_kwargs)
@@ -72,6 +100,25 @@ def run_inversion(
     )
 
 
+def plot_inversion(file_name):
+
+    input_path = "./results/inversion/input-" + file_name + ".nc"
+    results_path = "./results/inversion/results-" + file_name + ".nc"
+
+    input_ds = xr.open_dataset(input_path)
+    results_ds = xr.open_dataset(results_path)
+
+    # print(input_ds)
+    # print(results_ds)
+
+    plot_covariance_matrix(input_ds, results_ds)
+
+    # model_params_timeseries(input_ds, results_ds)
+    # model_params_histogram(input_ds, results_ds)
+    # resulting_model_histogram(input_ds, results_ds)
+    # plot_data_pred_histogram(input_ds, results_ds)
+
+
 if __name__ == "__main__":
     """
     profiling command
@@ -79,66 +126,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    sample_prior = False
-    proposal_distribution = "cauchy"
-    set_starting_model = False
+    run_inversion()
 
-    noise = 0.05  # real noise added to synthetic data (percentage)
-    sigma_data = 0.05  # assumed noise used in likelihood calculation (percentage)
-    posterior_width = {
-        "depth": 1,  # 0.1,
-        "vel_s": 1,  # 0.1,
-    }  # fractional step size (multiplied by param bounds width)
-
-    # rerun, plot = True, False
-    rerun, plot = False, True
-
-    if rerun:
-        # set up data and inversion params
-        bounds = {
-            "depth": [0.001, 0.3],  # km
-            "vel_s": [0.1, 1.8],  # km/s
-        }
-        model_params_kwargs = {
-            "n_layers": 2,
-            "vpvs_ratio": 1.75,
-            "param_bounds": bounds,
-            "posterior_width": posterior_width,
-        }
-        model_kwargs = {"sigma_data": sigma_data}
-        inversion_init_kwargs = {
-            "n_burn": 5000,
-            "n_chunk": 500,
-            "n_mcmc": 20000,
-            "n_chains": 1,
-            "beta_spacing_factor": 1.15,
-        }
-        inversion_run_kwargs = {
-            "proposal_distribution": proposal_distribution,
-        }
-
-        run_inversion(
-            noise,
-            model_params_kwargs,
-            model_kwargs,
-            inversion_init_kwargs,
-            inversion_run_kwargs,
-        )
-    if plot:
-        # depth = [0.02, 0.04]
-        # vel_s = [0.2, 1.0, 1.5]
-        file_name = "1753900188"  # noise: 0.05, sigma_data: 0.05, depth_scale: 0.1, vel_s_scale: 0.1
-
-        input_path = "./results/inversion/input-" + file_name + ".nc"
-        results_path = "./results/inversion/results-" + file_name + ".nc"
-
-        input_ds = xr.open_dataset(input_path)
-        results_ds = xr.open_dataset(results_path)
-
-        print(input_ds)
-        # print(results_ds)
-
-        # model_params_timeseries(input_ds, results_ds)
-        # model_params_histogram(input_ds, results_ds)
-        resulting_model_histogram(input_ds, results_ds)
-        plot_data_pred_histogram(input_ds, results_ds)
+    file_name = "1754417388"
+    # plot_inversion(file_name)

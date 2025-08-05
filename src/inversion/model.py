@@ -45,6 +45,8 @@ class Model:
 
         self.beta = beta
 
+        self.params_sum = np.zeros(n_params)
+        self.cov_mat_sum = np.zeros((n_params, n_params))
         self.cov_mat = np.zeros((n_params, n_params))
 
         # variables for storing and computing covariance matrix after burn-in
@@ -132,7 +134,7 @@ class Model:
                 self.model_params.model_params = test_model_params.copy()
 
         self.update_acceptance_rate(acc, ind)
-        self.stepsize_tuning(n_step)
+        # self.stepsize_tuning(n_step)
 
     def acceptance_criteria(self, test_model_params, ind, data, T, sample_prior):
         """
@@ -200,6 +202,7 @@ class Model:
             ] / (
                 self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
             )
+        # print(self.acceptance_rate["acc_rate"][ind])
 
     def get_likelihood(self, model_params, data):
         """
@@ -251,21 +254,28 @@ class Model:
         # adapt the acceptance rate less and less as more steps are taken
         # diff = np.abs(acc_rate - acc_optimal)
         high_inds = self.acceptance_rate["acc_rate"] > 0.4
-        low_inds = self.acceptance_rate["acc_rate"] < 0.2
+        low_inds = (self.acceptance_rate["acc_rate"] > 0) & (
+            self.acceptance_rate["acc_rate"] < 0.2
+        )
         self.posterior_width[high_inds] = (
-            self.posterior_width[high_inds] * 0.9
+            self.posterior_width[high_inds] * 1.5
         )  # gamma*diff
-        self.posterior_width[low_inds] = self.posterior_width[low_inds] * 1.1
+        self.posterior_width[low_inds] = self.posterior_width[low_inds] * 0.5
 
     def update_covariance_matrix(self, n_step):
-        # need prev matrix to compute current.
-        # subtract prev mean cov and current mean cov mat.
+        # track sample mean
+        # add newest sample to current cov mat
+        # store sum without averaging
 
         # update mean params
-        self.mean_params = (1 / n_step) * (
-            ((n_step - 1) / n_step) * (self.mean_params)
-            + self.model_params.model_params
-        )
-        self.cov_mat = (1 / n_step) * (
-            np.sum(self.model_params.model_params - self.mean_params) ** 2
-        )
+        self.params_sum += self.model_params.model_params
+        mean_params = self.params_sum / n_step
+
+        # for each combination of params
+        # add to the sum
+        self.cov_mat_sum += (self.model_params.model_params - mean_params) @ (
+            self.model_params.model_params - mean_params
+        ).T
+
+        # divide cov mat by number of samples
+        self.cov_mat = self.cov_mat_sum / n_step

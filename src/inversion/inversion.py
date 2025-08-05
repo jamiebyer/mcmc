@@ -126,6 +126,10 @@ class Inversion:
                     "dims": "n_model_params",
                     "data": np.arange(model_params.n_model_params),
                 },
+                "n_model_params_y": {
+                    "dims": "n_model_params_y",
+                    "data": np.arange(model_params.n_model_params),
+                },
                 "step": {"dims": "step", "data": np.arange(self.n_chunk)},
             },
             "data_vars": {
@@ -134,6 +138,16 @@ class Inversion:
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
                 "logL": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+                "cov_mat": {
+                    "dims": ["n_model_params", "n_model_params_y", "step"],
+                    "data": np.empty(
+                        (
+                            model_params.n_model_params,
+                            model_params.n_model_params,
+                            self.n_chunk,
+                        )
+                    ),
+                },
                 "acc_rate": {
                     "dims": ["n_model_params", "step"],
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
@@ -309,6 +323,9 @@ class Inversion:
 
             # store every sample; only write to file every n_chunk samples.
             self.store_samples(n_steps)
+            # update cov matrix (every n steps)
+            if n_steps > self.n_burn:
+                chain_model.update_covariance_matrix(n_steps)
             self.write_samples(n_steps, out_path)
 
         # add most probable model to file
@@ -332,6 +349,9 @@ class Inversion:
                     :, n_save
                 ] = chain.model_params.model_params.copy()
                 self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
+                self.ds_storage["data_vars"]["cov_mat"]["data"][
+                    :, :, n_save
+                ] = chain.cov_mat
                 self.ds_storage["data_vars"]["data_pred"]["data"][
                     :, n_save
                 ] = chain.data_pred.copy()
@@ -339,9 +359,9 @@ class Inversion:
 
                 # acceptance rate
                 self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
-                    chain.acceptance_rate["n_acc"]
-                    / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
+                    chain.acceptance_rate["acc_rate"]
                 )
+
                 """
                 # error ratio
                 self.ds_storage["data_vars"]["fm_err"]["data"] = chain.acceptance_rate[

@@ -19,7 +19,9 @@ def model_params_timeseries(input_ds, results_ds):
     # use input_ds to interpret results_ds
 
     # cut results by step
-    results_ds = results_ds.isel(step=slice(input_ds.attrs["n_burn"], len(results_ds)))
+    results_ds = results_ds.isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -308,6 +310,14 @@ def plot_data_pred_histogram(input_ds, results_ds, n_bins=100):
 
     plt.legend(["data_true", "data_obs", "data_pred"])
     plt.show()
+
+
+def plot_covariance_matrix(input_ds, results_ds):
+    print(results_ds["cov_mat"][:, :, 0].values)
+    print(results_ds["cov_mat"][:, :, 1].values)
+    print(results_ds["cov_mat"][:, :, -1].values)
+    # plt.imshow(results_ds["cov_mat"][:, :, -1])
+    # plt.show()
 
 
 def compare_results():
