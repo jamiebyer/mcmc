@@ -279,3 +279,110 @@ class Model:
 
         # divide cov mat by number of samples
         self.cov_mat = self.cov_mat_sum / n_step
+def get_jacobian(self, freqs, n_dm=50):
+        """
+        n_freqs is also n_depths | n_layers
+        """
+        n_freqs = len(freqs)
+        dm_start = self.params * 0.1
+        dm = np.zeros(n_dm, self.n_params)
+        dm[0] = dm_start
+        dRdm = np.zeros((self.n_params, n_freqs, n_dm))
+
+        # Estimate deriv for range of dm values
+        for dm_ind in range(n_dm):
+            model_pos = self.params + dm[dm_ind]
+            model_neg = self.params - dm[dm_ind]
+
+            for param_ind in range(self.n_params):
+                model_pos[param_ind] = model_pos[param_ind] + dm[param_ind, dm_ind]
+
+                # each frequency is a datum?
+                pdr_pos = VelocityModel.forward_model(freqs, model_pos)
+                pdr_neg = VelocityModel.forward_model(freqs, model_neg)
+
+                dRdm[param_ind, :, dm_ind] = np.where(
+                    (np.abs((pdr_pos - pdr_neg) / (pdr_pos + pdr_neg)) > 1.0e-7 < 5),
+                    (pdr_pos - pdr_neg) / (2.0 * dm[param_ind, dm_ind]),
+                    dRdm[param_ind, :, dm_ind],
+                )
+
+                # setting dm for the next loop
+                if dm_ind < n_dm - 1:
+                    dm[:, dm_ind + 1] = dm[:, dm_ind] / 1.5
+
+        Jac = self.get_best_derivative(dRdm, n_freqs, n_dm)
+
+        return Jac
+
+    def get_best_derivative(self, dRdm, n_freqs, n_dm):
+        Jac = np.zeros((n_freqs, self.n_params))
+        # can prolly simplify these loops ***
+        for param_ind in range(self.n_params):
+            for freq_ind in range(
+                n_freqs
+            ):  # For each datum, choose best derivative estimate
+                best = 1.0e10
+                ibest = 1
+
+                for dm_ind in range(n_dm - 2):
+                    # check if the derivative will very very large
+                    if np.any(
+                        np.abs(dRdm[param_ind, freq_ind, dm_ind : dm_ind + 2]) < 1.0e-7
+                    ):
+                        test = 1.0e20
+                    else:
+                        test = np.abs(
+                            np.sum(
+                                (
+                                    dRdm[param_ind, freq_ind, dm_ind : dm_ind + 1]
+                                    / dRdm[param_ind, freq_ind, dm_ind + 1 : dm_ind + 2]
+                                )
+                                / 2
+                                - 1
+                            )
+                        )
+
+                    if (test < best) and (test > 1.0e-7):
+                        best = test
+                        ibest = dm_ind + 1
+
+                Jac[freq_ind, param_ind] = dRdm[
+                    param_ind, freq_ind, ibest
+                ]  # Best deriv into Jacobian
+                if best > 1.0e10:
+                    Jac[freq_ind, param_ind] = 0.0
+
+        return Jac
+
+    def lin_rot(self, freqs, bounds, sigma=0.1):
+        n_freqs = len(freqs)
+
+        Jac = self.get_jacobian(freqs, n_freqs)
+        Jac = Jac * bounds[2, :]  # Scale columns of Jacobian for stability
+
+        # what should this value be ??
+        Mpriorinv = np.diag(self.n_params * [12])  # variance for U[0,1]=1/12
+
+        Cdinv = np.diag(1 / sigma**2)  # what should sigma be ??
+
+        JactCdinv = np.matmul(np.transpose(Jac), Cdinv)
+        Ctmp = np.matmul(JactCdinv, Jac) + Mpriorinv
+
+        V, L, VT = np.linalg.svd(Ctmp)
+        pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
+
+        return pcsd
+
+    def get_likelihood(freqs, velocity_model, sigma_pd, n_params, phase_vel_obs):
+        """ """
+        # from the velocity model, calculate phase velocity and compare to true data.
+        phase_velocity_cur = VelocityModel.forward_model(freqs, velocity_model)
+
+        residuals = phase_vel_obs - phase_velocity_cur
+
+        logL = -(1 / 2) * n_params * np.log(sigma_pd) - np.sum(residuals**2) / (
+            2 * sigma_pd**2
+        )
+
+        return np.sum(logL)
