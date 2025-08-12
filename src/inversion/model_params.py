@@ -1,6 +1,7 @@
 import numpy as np
 from disba import PhaseDispersion
 from disba._exception import DispersionError
+from numba.core.errors import TypingError
 import xarray as xr
 
 np.complex_ = np.complex64
@@ -178,10 +179,11 @@ class DispersionCurveParams(ModelParams):
             phase_velocity = pd_rayleigh.velocity
 
             return phase_velocity, model_params
-        except (DispersionError, ZeroDivisionError) as e:
+        except (DispersionError, ZeroDivisionError, TypingError) as e:
             # *** track the type of error ***
             # failed to find root for fundamental mode
             # division by zero
+            # raise e
             raise e
 
 

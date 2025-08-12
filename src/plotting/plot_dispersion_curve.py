@@ -313,11 +313,9 @@ def plot_data_pred_histogram(input_ds, results_ds, n_bins=100):
 
 
 def plot_covariance_matrix(input_ds, results_ds):
-    print(results_ds["cov_mat"][:, :, 0].values)
-    print(results_ds["cov_mat"][:, :, 1].values)
-    print(results_ds["cov_mat"][:, :, -1].values)
-    # plt.imshow(results_ds["cov_mat"][:, :, -1])
-    # plt.show()
+    # print(results_ds["cov_mat"][:, :, -1].values)
+    plt.imshow(results_ds["cov_mat"][:, :, -1])
+    plt.show()
 
 
 def compare_results():

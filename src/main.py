@@ -126,7 +126,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    run_inversion()
+    # run_inversion()
 
-    file_name = "1754417388"
-    # plot_inversion(file_name)
+    file_name = "1754422831"
+    plot_inversion(file_name)

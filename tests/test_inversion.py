@@ -39,6 +39,18 @@ def setup_data(model_params, sigma_data):
 # TESTING BAYESIAN INVERSION
 
 
+def test_noise_levels():
+    pass
+
+
+def test_params_rotations():
+    """
+    need to test linear and PC rotations
+    look at the normalized covariance matrix.
+    """
+    pass
+
+
 def test_layer_swap():
     pass
 

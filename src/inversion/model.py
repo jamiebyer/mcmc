@@ -1,5 +1,6 @@
 import numpy as np
 from disba._exception import DispersionError
+from numba.core.errors import TypingError
 import pandas as pd
 
 np.complex_ = np.complex64
@@ -82,7 +83,9 @@ class Model:
         data,
         proposal_distribution,
         n_step,
+        burn_in,
         T=1,
+        rotate=True,
         sample_prior=False,
     ):
         """
@@ -94,27 +97,44 @@ class Model:
         :param T:
         :param sample_prior:
         """
-        # can normalize
+        # normalize (by parameter bounds...)
+        model_params_norm = (
+            self.model_params.model_params - self.param_bounds[:, 0]
+        ) / self.param_bounds[:, 2]
 
-        # randomly select a model parameter to perturb
-        ind = np.random.randint(self.model_params.n_model_params)
-
-        # copy current model params to perturb
-        test_model_params = self.model_params.model_params.copy()
-
-        # uniform distribution
-        if proposal_distribution == "uniform":
-            test_model_params[ind] = (
-                self.param_bounds[ind][0]
-                + np.random.uniform() * self.param_bounds[ind][2]
+        if rotate:
+            model_params_rot, U, self.posterior_width = self.rotate_params(
+                model_params_norm
             )
-        elif proposal_distribution == "cauchy":
-            # cauchy distribution
-            test_model_params[ind] += (
-                self.posterior_width[ind]
-                * self.param_bounds[ind][2]
-                * np.tan(np.pi * (np.random.uniform() - 0.5))
-            )
+
+        # perturb each parameter individually
+        # ***
+        for ind in range(self.model_params.n_model_params):
+            # copy current model params to perturb
+            #
+            if rotate:
+                test_model_params = model_params_rot
+            else:
+                test_model_params = self.model_params.model_params.copy()
+
+            if proposal_distribution == "uniform":
+                # uniform distribution
+                test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform()
+            elif proposal_distribution == "cauchy":
+                # cauchy distribution
+                test_model_params[ind] += self.posterior_width[ind] * np.tan(
+                    np.pi * (np.random.uniform() - 0.5)
+                )
+
+        if rotate:
+            # rotate back
+            test_model_params = U @ test_model_params
+
+        # reverse normalization (to check forward model)
+        # could be before or after checking bounds...
+        test_model_params = (
+            test_model_params * self.param_bounds[:, 2]
+        ) + self.param_bounds[:, 0]
 
         # check bounds
         valid_params = self.validate_bounds(test_model_params, ind)
@@ -136,6 +156,134 @@ class Model:
         self.update_acceptance_rate(acc, ind)
         # self.stepsize_tuning(n_step)
 
+    #
+    # PARAM ROTATIONS
+    #
+
+    def rotate_params(self, model_params, burn_in):
+        """
+        before  burn-in use Jacobian
+        rotate to PC space (after burn in)
+        get posterior width / scale for propsal distribution
+        get rotation matrix and step size / standard deviation
+        """
+
+        # check if it's burn in
+        # if it's before burning, do a linear rotation
+        if burn_in:
+            model_params_rot, U, lamdb, self.linear_rotation()
+        else:
+            # get rotation matrix and step size from correlation matrix
+            lambd, U = np.linalg.eig(self.cov_mat)
+            model_params_rot = U.T @ model_params
+
+        return model_params_rot, U, lambd
+
+    def linear_rotation(self, var=12):
+        """
+        during burn-in, when there aren't enough samples to create a reliable covariance matrix,
+        use a linear approximation to perform rotation.
+
+        :param var: from trial and error... ***
+        """
+        jac_mat = self.get_jacobian()
+
+        m_prior_inv = np.diag(self.n_params * [var])  # to stabilize matrix inversion
+        cov_data_inv = np.diag(1 / self.sigma_data**2)  # ***
+        cov_tmp = jac_mat.T @ cov_data_inv @ jac_mat + m_prior_inv
+
+        V, L, VT = np.linalg.svd(cov_tmp)
+        pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
+
+        return pcsd
+
+    def get_jacobian(self, model_params, n_dm=50):
+        """
+        get jacobian matrix.
+        get derivatives for n_dm spacings, and keep the most stable values.
+
+        :param n_dm: number of derivative spacings to try.
+        """
+        # defining dm spacing
+        dm = self.params * 0.1 * (1 / 1.5) ** np.arange(n_dm)
+        # define array to hold derivatives. n_dm derivatives for each
+        # model parameter, and each data point.
+        derivatives = np.zeros((self.n_params, self.data.n_data, n_dm))
+
+        # estimate derivatives for range of dm values
+        for dm_ind in range(n_dm):
+            for param_ind in range(self.n_params):
+                model_pos = model_params.copy()
+                model_neg = model_params.copy()
+
+                model_pos[param_ind] = model_pos[param_ind] + dm[param_ind, dm_ind]
+                model_neg[param_ind] = model_neg[param_ind] - dm[param_ind, dm_ind]
+
+                # *** bc of the depth swapping, forward_model rn returns updated model params too
+                # get predicted data for pos and neg model params
+                data_pos = self.model_params.forward_model(self.data.periods, model_pos)
+                data_neg = self.model_params.forward_model(self.data.periods, model_neg)
+
+                # check that data_pos and data_neg aren't too far apart...
+                term = np.abs((data_pos - data_neg) / (data_pos + data_neg))
+                if term > 1.0e-7:
+                    # centered derivative
+                    derivatives[param_ind, :, dm_ind] = (data_pos - data_neg) / (
+                        2.0 * dm[param_ind, dm_ind]
+                    )
+                else:
+                    # set to zero to avoid numerical instability
+                    pass
+
+        jac_mat = self.get_best_derivative(derivatives, self.data.n_data, n_dm)
+
+        jac_mat = (
+            jac_mat * self.param_bounds[:, 2]
+        )  # scale columns of Jacobian for stability
+        return jac_mat
+
+    def get_best_derivative(self, derivatives, n_dm, min_bound=1.0e-7):
+        """
+        finding a stable value for the derivative for each parameter.
+        looking for a derivative that doesn't change much for a few different spacings.
+        populate Jacobian matrix with stable derivatives.
+
+        :param derivatives:
+        :param n_dm:
+        :param min_bound:
+        """
+        jac_mat = np.zeros((self.data.n_data, self.n_params))
+        variation = np.empty(self.n_params, self.data.n_data, n_dm - 2)
+
+        # set derivatives smaller than min_bound to NaN (and get indices)
+        nan_inds = derivatives < min_bound
+
+        for dm_ind in range(n_dm - 2):
+            # find derivatives which have the least variation
+            variation[:, :, dm_ind] = np.abs(
+                np.sum(
+                    (
+                        derivatives[not nan_inds][:, :, dm_ind : dm_ind + 1]
+                        / derivatives[not nan_inds][:, :, dm_ind + 1 : dm_ind + 2]
+                    )
+                    / 2
+                    - 1,
+                    axis=2,
+                )
+            )
+        # find min indices
+        min_inds = np.nanmin(variation, axis=2)  # plus 1 ***
+        # set Jacobian values
+        jac_mat = derivatives[min_inds]
+
+        # if ind is nan, set Jac ind to 0
+
+        return jac_mat
+
+    #
+    # ACCEPTANCE CRITERIA
+    #
+
     def acceptance_criteria(self, test_model_params, ind, data, T, sample_prior):
         """
         determine whether to accept the test model parameters.
@@ -155,6 +303,7 @@ class Model:
             # for testing and sampling the prior, return perfect likelihood and empty data.
             logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
         elif not self.model_params.validate_physics():
+            # *** separate function for validating params and running forward model?
             # check that halfspace is the fastest layer
             # check specific criteria for params
             self.model_params.validate_physics()
@@ -164,7 +313,7 @@ class Model:
                 logL_new, data_pred_new, model_params = self.get_likelihood(
                     test_model_params, data
                 )
-            except (DispersionError, ZeroDivisionError):
+            except (DispersionError, ZeroDivisionError, TypingError):
                 # add specific condition here for failed forward model
                 self.acceptance_rate["n_fm_err"][ind] += 1
                 return False, None
@@ -202,7 +351,6 @@ class Model:
             ] / (
                 self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
             )
-        # print(self.acceptance_rate["acc_rate"][ind])
 
     def get_likelihood(self, model_params, data):
         """
@@ -224,16 +372,18 @@ class Model:
 
             return logL, data_pred, model_params
 
-        except (DispersionError, ZeroDivisionError) as e:
+        except (DispersionError, ZeroDivisionError, TypeError) as e:
             raise e
+
+    #
+    # STEPSIZE TUNING
+    #
 
     def stepsize_tuning(self, n_step):
         """
         Step size can be found by trial and error.
         This is sometimes done during burn in, where we target an acceptance rate of ~30%.
         When a << 30%, decrease step size; when a >> 30%, increase step size.
-        Once an acceptable step size it found, stop adapting.
-        Sometimes, we do this by way of diminishing adaptation (see Rosenthal in Handbook of MCMC).
         Adapt the step size less and less as the sampler progresses, until adaptation vanishes.
         """
 
@@ -279,110 +429,3 @@ class Model:
 
         # divide cov mat by number of samples
         self.cov_mat = self.cov_mat_sum / n_step
-def get_jacobian(self, freqs, n_dm=50):
-        """
-        n_freqs is also n_depths | n_layers
-        """
-        n_freqs = len(freqs)
-        dm_start = self.params * 0.1
-        dm = np.zeros(n_dm, self.n_params)
-        dm[0] = dm_start
-        dRdm = np.zeros((self.n_params, n_freqs, n_dm))
-
-        # Estimate deriv for range of dm values
-        for dm_ind in range(n_dm):
-            model_pos = self.params + dm[dm_ind]
-            model_neg = self.params - dm[dm_ind]
-
-            for param_ind in range(self.n_params):
-                model_pos[param_ind] = model_pos[param_ind] + dm[param_ind, dm_ind]
-
-                # each frequency is a datum?
-                pdr_pos = VelocityModel.forward_model(freqs, model_pos)
-                pdr_neg = VelocityModel.forward_model(freqs, model_neg)
-
-                dRdm[param_ind, :, dm_ind] = np.where(
-                    (np.abs((pdr_pos - pdr_neg) / (pdr_pos + pdr_neg)) > 1.0e-7 < 5),
-                    (pdr_pos - pdr_neg) / (2.0 * dm[param_ind, dm_ind]),
-                    dRdm[param_ind, :, dm_ind],
-                )
-
-                # setting dm for the next loop
-                if dm_ind < n_dm - 1:
-                    dm[:, dm_ind + 1] = dm[:, dm_ind] / 1.5
-
-        Jac = self.get_best_derivative(dRdm, n_freqs, n_dm)
-
-        return Jac
-
-    def get_best_derivative(self, dRdm, n_freqs, n_dm):
-        Jac = np.zeros((n_freqs, self.n_params))
-        # can prolly simplify these loops ***
-        for param_ind in range(self.n_params):
-            for freq_ind in range(
-                n_freqs
-            ):  # For each datum, choose best derivative estimate
-                best = 1.0e10
-                ibest = 1
-
-                for dm_ind in range(n_dm - 2):
-                    # check if the derivative will very very large
-                    if np.any(
-                        np.abs(dRdm[param_ind, freq_ind, dm_ind : dm_ind + 2]) < 1.0e-7
-                    ):
-                        test = 1.0e20
-                    else:
-                        test = np.abs(
-                            np.sum(
-                                (
-                                    dRdm[param_ind, freq_ind, dm_ind : dm_ind + 1]
-                                    / dRdm[param_ind, freq_ind, dm_ind + 1 : dm_ind + 2]
-                                )
-                                / 2
-                                - 1
-                            )
-                        )
-
-                    if (test < best) and (test > 1.0e-7):
-                        best = test
-                        ibest = dm_ind + 1
-
-                Jac[freq_ind, param_ind] = dRdm[
-                    param_ind, freq_ind, ibest
-                ]  # Best deriv into Jacobian
-                if best > 1.0e10:
-                    Jac[freq_ind, param_ind] = 0.0
-
-        return Jac
-
-    def lin_rot(self, freqs, bounds, sigma=0.1):
-        n_freqs = len(freqs)
-
-        Jac = self.get_jacobian(freqs, n_freqs)
-        Jac = Jac * bounds[2, :]  # Scale columns of Jacobian for stability
-
-        # what should this value be ??
-        Mpriorinv = np.diag(self.n_params * [12])  # variance for U[0,1]=1/12
-
-        Cdinv = np.diag(1 / sigma**2)  # what should sigma be ??
-
-        JactCdinv = np.matmul(np.transpose(Jac), Cdinv)
-        Ctmp = np.matmul(JactCdinv, Jac) + Mpriorinv
-
-        V, L, VT = np.linalg.svd(Ctmp)
-        pcsd = 0.5 * (1.0 / np.sqrt(np.abs(L)))  # PC standard deviations
-
-        return pcsd
-
-    def get_likelihood(freqs, velocity_model, sigma_pd, n_params, phase_vel_obs):
-        """ """
-        # from the velocity model, calculate phase velocity and compare to true data.
-        phase_velocity_cur = VelocityModel.forward_model(freqs, velocity_model)
-
-        residuals = phase_vel_obs - phase_velocity_cur
-
-        logL = -(1 / 2) * n_params * np.log(sigma_pd) - np.sum(residuals**2) / (
-            2 * sigma_pd**2
-        )
-
-        return np.sum(logL)

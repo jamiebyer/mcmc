@@ -301,14 +301,16 @@ class Inversion:
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
-            # burn_in = n_steps < self.n_burn
+            burn_in = n_steps < self.n_burn
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
+                # could do normalization and PC rotation out here... ***
                 chain_model.perturb_params(
                     self.data,
                     proposal_distribution,
                     n_steps,
+                    burn_in,
                     sample_prior=sample_prior,
                 )
 
@@ -324,7 +326,7 @@ class Inversion:
             # store every sample; only write to file every n_chunk samples.
             self.store_samples(n_steps)
             # update cov matrix (every n steps)
-            if n_steps > self.n_burn:
+            if not burn_in:
                 chain_model.update_covariance_matrix(n_steps)
             self.write_samples(n_steps, out_path)
 
