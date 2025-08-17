@@ -45,7 +45,6 @@ def run_inversion():
         "param_bounds": bounds,
         "posterior_width": posterior_width,
     }
-    model_kwargs = {"sigma_data": sigma_data}
     inversion_init_kwargs = {
         "n_burn": 5000,
         "n_chunk": 500,
@@ -55,6 +54,7 @@ def run_inversion():
     }
     inversion_run_kwargs = {
         "proposal_distribution": proposal_distribution,
+        "rotate_params": True,
     }
 
     # model params
@@ -74,6 +74,7 @@ def run_inversion():
         depth=depth,
         vel_s=vel_s,
     )
+    model_kwargs = {"sigma_data": sigma_data * data.data_obs}
 
     # run inversion
     inversion = Inversion(
@@ -102,8 +103,8 @@ def run_inversion():
 
 def plot_inversion(file_name):
 
-    input_path = "./results/inversion/input-" + file_name + ".nc"
-    results_path = "./results/inversion/results-" + file_name + ".nc"
+    input_path = "./results/inversion/tests/input-" + file_name + ".nc"
+    results_path = "./results/inversion/tests/results-" + file_name + ".nc"
 
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
@@ -112,11 +113,10 @@ def plot_inversion(file_name):
     # print(results_ds)
 
     plot_covariance_matrix(input_ds, results_ds)
-
-    # model_params_timeseries(input_ds, results_ds)
-    # model_params_histogram(input_ds, results_ds)
-    # resulting_model_histogram(input_ds, results_ds)
-    # plot_data_pred_histogram(input_ds, results_ds)
+    model_params_timeseries(input_ds, results_ds)
+    model_params_histogram(input_ds, results_ds)
+    resulting_model_histogram(input_ds, results_ds)
+    plot_data_pred_histogram(input_ds, results_ds)
 
 
 if __name__ == "__main__":
@@ -128,5 +128,5 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    file_name = "1754422831"
+    file_name = "rotation"
     plot_inversion(file_name)

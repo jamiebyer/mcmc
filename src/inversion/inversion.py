@@ -22,8 +22,8 @@ class Inversion:
         n_burn,
         n_chunk,
         n_mcmc,
-        beta_spacing_factor=None,
         n_chains=1,
+        beta_spacing_factor=None,
         out_filename=None,
     ):
         """
@@ -101,8 +101,10 @@ class Inversion:
 
         input_ds = xr.Dataset.from_dict(input_dict)
 
-        # if the output folder doesn't exist, create it.
-        out_path = self.out_dir + "input-" + self.out_filename + ".nc"
+        filename = self.out_filename.split("/")[-1]
+        out_path = self.out_dir + self.out_filename + ".nc"
+        out_path = out_path.replace(filename, "input-" + filename)
+
         # saved dataset should just have parameter names, dimensions, and constants
         if not os.path.isfile(out_path):
             input_ds.to_netcdf(out_path)
@@ -115,7 +117,10 @@ class Inversion:
         }
         ds = xr.Dataset(coords=coords)
 
-        out_path = self.out_dir + "results-" + self.out_filename + ".nc"
+        filename = self.out_filename.split("/")[-1]
+        out_path = self.out_dir + self.out_filename + ".nc"
+        out_path = out_path.replace(filename, "results-" + filename)
+
         if not os.path.isfile(out_path):
             ds.to_netcdf(out_path)
 
@@ -289,12 +294,17 @@ class Inversion:
         model_params,
         proposal_distribution,
         sample_prior=False,
+        rotate_params=False,
     ):
         """
         perform the main loop, for n_mcmc iterations.
         """
         start_time = time.time()
-        out_path = self.out_dir + "results-" + self.out_filename + ".nc"
+
+        filename = self.out_filename.split("/")[-1]
+        out_path = self.out_dir + self.out_filename + ".nc"
+        out_path = out_path.replace(filename, "results-" + filename)
+
         # create empty file to save results
         # define dict for saving results
         self.define_results_dataset(model_params)
@@ -311,7 +321,9 @@ class Inversion:
                     proposal_distribution,
                     n_steps,
                     burn_in,
+                    self.n_chunk,
                     sample_prior=sample_prior,
+                    rotate_params=rotate_params,
                 )
 
                 delayed_results.append(chain_model)
@@ -325,9 +337,6 @@ class Inversion:
 
             # store every sample; only write to file every n_chunk samples.
             self.store_samples(n_steps)
-            # update cov matrix (every n steps)
-            if not burn_in:
-                chain_model.update_covariance_matrix(n_steps)
             self.write_samples(n_steps, out_path)
 
         # add most probable model to file
