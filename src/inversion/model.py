@@ -119,24 +119,23 @@ class Model:
                     self.update_covariance_matrix(n_step, model_params_norm)
                 )
 
-        # perturb each parameter individually
-        # ***
-        for ind in range(self.model_params.n_model_params):
-            # copy current model params to perturb
-            #
-            if rotate_params:
-                test_model_params = self.rotation_matrix.T @ model_params_norm
-            else:
-                test_model_params = model_params_norm.copy()
+        # *** pick a random parameter to perturb
+        ind = np.random.randint(self.model_params.n_model_params)
+        # copy current model params to perturb
+        #
+        if rotate_params:
+            test_model_params = self.rotation_matrix.T @ model_params_norm
+        else:
+            test_model_params = model_params_norm.copy()
 
-            if proposal_distribution == "uniform":
-                # uniform distribution
-                test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform()
-            elif proposal_distribution == "cauchy":
-                # cauchy distribution
-                test_model_params[ind] += self.posterior_width[ind] * np.tan(
-                    np.pi * (np.random.uniform() - 0.5)
-                )
+        if proposal_distribution == "uniform":
+            # uniform distribution
+            test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform()
+        elif proposal_distribution == "cauchy":
+            # cauchy distribution
+            test_model_params[ind] += self.posterior_width[ind] * np.tan(
+                np.pi * (np.random.uniform() - 0.5)
+            )
 
         if rotate_params:
             # rotate back

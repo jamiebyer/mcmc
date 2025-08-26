@@ -1,101 +1,22 @@
-import pytest
 import numpy as np
 
 from plotting.plot_dispersion_curve import *
-import matplotlib.pyplot as plt
-import xarray as xr
 import os
 from inversion.data import SyntheticData
 from inversion.model import Model
 from inversion.inversion import Inversion
 from inversion.model_params import DispersionCurveParams
 
-import cProfile
-from pstats import Stats, SortKey
 
 np.random.seed(0)
 
 
-def setup_data(model_params, sigma_data):
+def setup_test_data(model_params, noise, depth, vel_s):
     n_data = 50
     periods = np.flip(1 / np.logspace(0, 1.1, n_data))
 
     # run synthetic data that uses inversion calculations for vel_p and density
     # and optionally, setting vel_p and density exactly.
-    thickness = [0.03]
-    vel_s = [0.4, 1.5]
-
-    data = SyntheticData(
-        periods,
-        sigma_data,
-        model_params,
-        thickness=thickness,
-        vel_s=vel_s,
-    )
-
-    return data
-
-
-# TESTING BAYESIAN INVERSION
-
-
-def test_noise_levels():
-    pass
-
-
-def test_params_rotations():
-    """
-    need to test linear and PC rotations
-    look at the normalized covariance matrix.
-    """
-    # set up example data
-    sample_prior = False
-    proposal_distribution = "cauchy"
-    set_starting_model = True
-
-    noise = 0.02  # real noise added to synthetic data (percentage)
-    sigma_data = 0.02  # assumed noise used in likelihood calculation (percentage)
-    posterior_width = {
-        "depth": 0.1,
-        "vel_s": 0.1,
-    }  # fractional step size (multiplied by param bounds width)
-
-    # set up data and inversion params
-    bounds = {
-        "depth": [0.001, 0.3],  # km
-        "vel_s": [0.1, 1.8],  # km/s
-    }
-    model_params_kwargs = {
-        "n_layers": 1,
-        "vpvs_ratio": 1.75,
-        "param_bounds": bounds,
-        "posterior_width": posterior_width,
-    }
-    inversion_init_kwargs = {
-        # "n_burn": 5000,
-        "n_burn": 0,
-        "n_chunk": 500,
-        "n_mcmc": 20000,
-        "n_chains": 1,
-        "beta_spacing_factor": 1.15,
-        "out_filename": "tests/rotation",
-    }
-    inversion_run_kwargs = {
-        "proposal_distribution": proposal_distribution,
-        "rotate_params": False,
-    }
-
-    # model params
-    model_params = DispersionCurveParams(**model_params_kwargs)
-
-    # setup data
-    n_data = 50
-    periods = np.flip(1 / np.logspace(0, 1.1, n_data))
-
-    # depth = [0.02, 0.04]
-    # vel_s = [0.2, 0.6, 1.0]
-    depth = [0.04]
-    vel_s = [0.4, 1.0]
 
     data = SyntheticData(
         periods,
@@ -105,7 +26,64 @@ def test_params_rotations():
         vel_s=vel_s,
     )
 
+    return data
+
+
+def setup_test_model(n_layers):
+    # set up example data
+    posterior_width = {
+        "depth": 0.05,
+        "vel_s": 0.05,
+    }  # fractional step size (multiplied by param bounds width)
+
+    # set up data and inversion params
+    bounds = {
+        "depth": [0.001, 0.3],  # km
+        "vel_s": [0.1, 1.8],  # km/s
+    }
+    model_params_kwargs = {
+        "n_layers": n_layers,
+        "vpvs_ratio": 1.75,
+        "param_bounds": bounds,
+        "posterior_width": posterior_width,
+    }
+    # model params
+    model_params = DispersionCurveParams(**model_params_kwargs)
+
+    return model_params
+
+
+def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filename):
+    """
+    real noise added to synthetic data (percentage)
+    assumed noise used in likelihood calculation (percentage)
+    """
+    sigma_data = noise
+
+    if n_layers == 1:
+        # one layer
+        depth = [0.02]
+        vel_s = [0.4, 1.0]
+    elif n_layers == 2:
+        # two layers
+        depth = [0.02, 0.04]
+        vel_s = [0.2, 0.6, 1.0]
+
+    model_params = setup_test_model(n_layers)
+    data = setup_test_data(model_params, noise, depth, vel_s)
+
+    inversion_init_kwargs = {
+        "n_burn": 5000,
+        "n_burn": 0,
+        "n_chunk": 500,
+        "n_mcmc": 20000,
+        "n_chains": 1,
+        "beta_spacing_factor": 1.15,
+        "out_filename": out_filename,
+    }
+
     model_kwargs = {"sigma_data": sigma_data * data.data_obs}
+
     # run inversion
     inversion = Inversion(
         data,
@@ -125,13 +103,168 @@ def test_params_rotations():
             model.get_likelihood(test_model_params, data)
         )
 
+    return inversion, model_params
+
+
+# TEST INITIALIZATIONS
+
+
+def test_data_setup():
+    # test that variables are initialized properly
+    pass
+
+
+# TESTING BAYESIAN INVERSION
+
+
+def test_perturb_params():
+    # check that one parameter is modified at a time
+    # check the size of the perturbations....
+    # test that each of the params are being modified roughly the same amount.
+
+    inversion, model_params = basic_inversion()
+
+    inversion_run_kwargs = {
+        "proposal_distribution": "cauchy",
+        "rotate_params": True,
+    }
+    model = inversion.chains[0]
+    # set model params
+
+    model.perturb_params()
+
+
+def test_run_inversions():
+    """
+    - Run with sampling prior. Run with setting the starting model, run without.
+        - Run with 1 layer, 2 layers.
+        - Run with low noise, medium noise, high noise.
+    """
+    sample_prior = False
+    set_starting_model = False
+    n_layers = 2
+    noise = 0.05  # 0.02 # 0.05 # 0.1
+
+    out_filename = (
+        "/tests/test-run-"
+        + str(sample_prior)
+        + "-"
+        + str(set_starting_model)
+        + "-"
+        + str(n_layers)
+        + "-"
+        + str(noise)
+    )
+
+    inversion, model_params = basic_inversion(
+        n_layers=n_layers,
+        noise=noise,
+        sample_prior=sample_prior,
+        set_starting_model=set_starting_model,
+        out_filename=out_filename,
+    )
     inversion.random_walk(
         model_params,
-        **inversion_run_kwargs,
+        proposal_distribution="cauchy",
+        rotate_params=False,
     )
 
 
+def test_linear_rotations():
+    """
+    need to test linear and PC rotations
+    look at the normalized covariance matrix.
+    """
+    inversion_run_kwargs = {
+        "proposal_distribution": "cauchy",
+        "rotate_params": True,
+    }
+    inversion, model_params = basic_inversion()
+
+    model = inversion.chains[0]
+    # set model params
+
+    # normalize (by parameter bounds...)
+    model_params_norm = (
+        model.model_params.model_params - model.param_bounds[:, 0]
+    ) / model.param_bounds[:, 2]
+
+    # linear rotation
+    model.rotation_matrix, model.posterior_width = model.linear_rotation(
+        model_params_norm, inversion.data
+    )
+    # rotate params
+    test_model_params = model.rotation_matrix.T @ model_params_norm
+    # *** check the result ***
+
+    # perturb params
+    ind = np.random.randint(model.model_params.n_model_params)
+    # cauchy distribution
+    test_model_params[ind] += model.posterior_width[ind] * np.tan(
+        np.pi * (np.random.uniform() - 0.5)
+    )
+
+    # rotate back
+    test_model_params = model.rotation_matrix @ test_model_params
+
+    # reverse normalization (to check forward model)
+    # could be before or after checking bounds...
+    test_model_params = (
+        test_model_params * model.param_bounds[:, 2]
+    ) + model.param_bounds[:, 0]
+
+    # *** check that the results make sense ***
+
+
+def test_PC_rotations():
+    """
+    need to test linear and PC rotations
+    look at the normalized covariance matrix.
+    """
+    # inversion = basic_inversion()
+    inversion, model_params, inversion_run_kwargs = basic_inversion()
+    model = inversion.chains[0]
+
+    # set model params
+    # rotate
+    # check that results make sense...
+    # rotate back
+    # check that results make sense...
+    # normalize (by parameter bounds...)
+    model_params_norm = (
+        model.model_params.model_params - model.param_bounds[:, 0]
+    ) / model.param_bounds[:, 2]
+
+    # get rotation matrix and step size from correlation matrix
+    model.rotation_matrix, model.posterior_width = model.update_covariance_matrix(
+        n_step, model_params_norm
+    )
+
+    # *** pick a random parameter to perturb
+    ind = np.random.randint(model.model_params.n_model_params)
+
+    test_model_params = model.rotation_matrix.T @ model_params_norm
+
+    # cauchy distribution
+    test_model_params[ind] += model.posterior_width[ind] * np.tan(
+        np.pi * (np.random.uniform() - 0.5)
+    )
+
+    # rotate back
+    test_model_params = model.rotation_matrix @ test_model_params
+
+    # reverse normalization (to check forward model)
+    # could be before or after checking bounds...
+    test_model_params = (
+        test_model_params * model.param_bounds[:, 2]
+    ) + model.param_bounds[:, 0]
+
+    # check bounds
+    # valid_params = self.validate_bounds(test_model_params)
+
+
 def test_layer_swap():
+    # propose parameters where the lower layer crosses the upper layer
     pass
 
 
@@ -146,13 +279,6 @@ def test_acceptance_criteria():
 def test_proposal_distribution():
     # run an inversion and check that the results are roughly uniform
     # and in bounds.
-    pass
-
-
-def test_perturb_params():
-    # check that one parameter is modified at a time
-    # check the size of the perturbations....
-    # test that each of the params are being modified roughly the same amount.
     pass
 
 
@@ -171,100 +297,14 @@ def test_likelihood():
 
 
 def test_writing_samples():
-    #
+    # check that it is not overwriting file
+    # check that after writing, it reads in what you expect...
     pass
 
 
-def test_sampling_prior(rerun=True, plot=True):
-    """
-    run tests for:
-    - sample prior; uniform
-    - sample prior; cauchy
-    - start from true; low noise
-    - start from true; high noise
-    - generate true model; low noise
-    - generate true model; high noise
-    """
-    sample_prior = False
-    proposal_distribution = "cauchy"
-    set_starting_model = False
-    noise = 0.1
-    sigma_model = {
-        "thickness": 0.1,
-        "vel_s": 0.1,
-    }  # fractional step size (multiplied by param bounds width)
-
-    in_path = "./results/inversion/results-sample_prior.nc"
-    # likelihood always returns 1
-    if rerun:
-        # deleting test file if it exists
-        if os.path.isfile(in_path):
-            # *** make sure .nc is written in a context manager by the end
-            f = open(in_path, "r")
-            f.close()
-            os.remove(in_path)
-
-        # set up data and inversion params
-        bounds = {
-            "thickness": [0.001, 0.1],  # km
-            "vel_s": [0.1, 1.8],  # km/s
-        }
-        model_params_kwargs = {
-            "n_layers": 1,
-            "sigma_model": sigma_model,
-            "vpvs_ratio": 1.75,
-            "param_bounds": bounds,
-        }
-        inversion_init_kwargs = {
-            "n_burn": 0,
-            "n_chunk": 500,
-            "n_mcmc": 10000,
-            "n_chains": 1,
-            "beta_spacing_factor": 1.15,
-        }
-        inversion_run_kwargs = {
-            "proposal_distribution": proposal_distribution,
-            "scale_factor": [1, 1],
-        }
-
-        # model params
-        model_params = DispersionCurveParams(**model_params_kwargs)
-        data = setup_data(model_params, sigma_data=noise)
-
-        # run inversion
-        inversion = Inversion(
-            data,
-            model_params,
-            **inversion_init_kwargs,
-        )
-
-        if set_starting_model:
-            # set initial model to true model
-            model = inversion.chains[0]
-            test_model_params = np.array([0.03, 0.4, 1.5])
-            velocity_model = model.model_params.get_velocity_model(test_model_params)
-            model.model_params.model_params = test_model_params
-
-            # set initial likelihood
-            model.logL, model.data_pred = model.get_likelihood(velocity_model, data)
-
-        # run inversion but always accept
-        inversion.random_walk(
-            model_params,
-            **inversion_run_kwargs,
-            out_filename="sample_prior",
-            rotation=False,
-            sample_prior=sample_prior,
-        )
-
-    # assert, all model params should be in bounds
-    if plot:
-        # plot_inversion_results_param_prob(in_path)  # , skip_inds=500000)
-        plot_inversion_results_param_time(in_path)  # , skip_inds=500000)
-        # plot_pred_vs_obs(in_path)
-        # plot_pred_hist(in_path)
-        # plot_resulting_model(in_path)
-        # pass
+def test_most_probable_model():
+    # test that the most probable model is computed properly
+    pass
 
 
 # TESTING OPTIMIZATION INVERSION
@@ -342,41 +382,3 @@ def test_optimization_inversion(setup_data):
 
     # check acceptance rate over time?
     # check that it converges
-
-
-def test_mcmc_inversion(setup_data):
-    data = setup_data
-
-    bounds = {
-        "thickness": [0.01, 1],  # km
-        "vel_p": [0.1, 6],  # km/s
-        "vel_s": [0.1, 5],  # km/s
-        "density": [0.5, 5],  # g/cm^3
-    }
-    model_kwargs = {
-        "n_layers": 2,
-        "sigma_model": 0.005,
-        "poisson_ratio": 0.265,
-        "param_bounds": bounds,
-    }
-    inversion_init_kwargs = {
-        "n_bins": 200,
-        "n_burn": 10000,
-        "n_keep": 100,
-        "n_rot": 40000,
-        "n_chains": 1,
-        "beta_spacing_factor": 1.15,
-    }
-    inversion_run_kwargs = {
-        "max_perturbations": 10,
-        "hist_conv": 0.05,
-    }
-
-    # run inversion
-    inversion = Inversion(
-        data,
-        **model_kwargs,
-        **inversion_init_kwargs,
-    )
-
-    inversion.random_walk(**inversion_run_kwargs)

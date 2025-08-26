@@ -23,27 +23,22 @@ def run_inversion():
     - generate true model; high noise
     """
 
-    sample_prior = False
-    proposal_distribution = "cauchy"
-    set_starting_model = False
-
+    set_starting_model = True
     noise = 0.05  # real noise added to synthetic data (percentage)
     sigma_data = 0.05  # assumed noise used in likelihood calculation (percentage)
-    posterior_width = {
-        "depth": 0.1,
-        "vel_s": 0.1,
-    }  # fractional step size (multiplied by param bounds width)
 
     # set up data and inversion params
-    bounds = {
-        "depth": [0.001, 0.3],  # km
-        "vel_s": [0.1, 1.8],  # km/s
-    }
     model_params_kwargs = {
         "n_layers": 2,
         "vpvs_ratio": 1.75,
-        "param_bounds": bounds,
-        "posterior_width": posterior_width,
+        "param_bounds": {
+            "depth": [0.001, 0.3],  # km
+            "vel_s": [0.1, 1.8],  # km/s
+        },
+        "posterior_width": {
+            "depth": 0.1,
+            "vel_s": 0.1,
+        },  # fractional step size (multiplied by param bounds width),
     }
     inversion_init_kwargs = {
         "n_burn": 5000,
@@ -53,7 +48,7 @@ def run_inversion():
         "beta_spacing_factor": 1.15,
     }
     inversion_run_kwargs = {
-        "proposal_distribution": proposal_distribution,
+        "proposal_distribution": "cauchy",
         "rotate_params": True,
     }
 
@@ -109,14 +104,11 @@ def plot_inversion(file_name):
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
 
-    # print(input_ds)
-    # print(results_ds)
-
-    plot_covariance_matrix(input_ds, results_ds)
-    model_params_timeseries(input_ds, results_ds)
-    model_params_histogram(input_ds, results_ds)
-    resulting_model_histogram(input_ds, results_ds)
-    plot_data_pred_histogram(input_ds, results_ds)
+    # plot_covariance_matrix(input_ds, results_ds)
+    model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
+    # model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":
@@ -128,5 +120,5 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    file_name = "rotation"
+    file_name = "test-run-False-False-2-0.05"
     plot_inversion(file_name)
