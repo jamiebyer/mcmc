@@ -45,6 +45,7 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     legend = []
     for c_ind, param in enumerate(param_types):
         inds = input_ds[param + "_inds"]
+        bounds = input_ds["param_bounds"][inds]
         for r_ind, p in enumerate(model_params[inds]):
             legend.append(param + " " + str(r_ind + 1))
             # param timeseries
@@ -56,10 +57,85 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
             # true model
             ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
             # most probable model
-            ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+            # ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
             # bounds
-            ax[r_ind, c_ind].axhline(input_ds.attrs[param + "_bounds"][0], c="black")
-            ax[r_ind, c_ind].axhline(input_ds.attrs[param + "_bounds"][1], c="black")
+            ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
+            ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
+
+            # axis labels
+            ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
+            ax[r_ind, c_ind].set_xlabel("step")
+
+    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/tests/time-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=""):
+    """
+    plot model params vs. time step.
+
+    plot param bounds as black vertical lines.
+    plot true model as red vertical lines.
+
+    :param input_ds:
+    :param results_ds:
+    """
+    # use input_ds to interpret results_ds
+
+    # cut results by step
+    results_ds = results_ds.isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+    step = results_ds["step"]
+
+    # true model
+    # true_model = input_ds["model_true"]
+    # get most probable model from ds_results
+    probable_model = results_ds["prob_params"]
+
+    param_types = ["depth", "vel_s"]
+    n_param_types = len(param_types)
+
+    # one column for depth, one for vel_s, one for likelihood and acceptance
+    n_layers = input_ds.attrs["n_layers"]
+
+    fig, ax = plt.subplots(
+        nrows=n_layers + 1, ncols=n_param_types, sharex=True, figsize=(14, 8)
+    )
+
+    # loop over all params and plot
+    # use param inds to get param name
+    legend = []
+    for c_ind, param in enumerate(param_types):
+        inds = input_ds[param + "_inds"]
+        bounds = input_ds["param_bounds"][inds]
+        for r_ind, p in enumerate(model_params[inds]):
+            legend.append(param + " " + str(r_ind + 1))
+            # param timeseries
+            print(p)
+            autocorr = np.correlate(p, p, mode="full")
+            print(autocorr)
+            ax[r_ind, c_ind].plot(
+                # step,
+                autocorr,
+                # s=2,
+            )
+
+            # true model
+            # ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
+            # most probable model
+            # ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+            # bounds
+            # ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
+            # ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
 
             # axis labels
             ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
@@ -75,6 +151,45 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
 
 
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
+    # cut results by step
+    results_ds = results_ds.isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    # use results_ds to get model params
+    # model_params = results_ds["model_params"].values
+    step = results_ds["step"]
+
+    plt.clf()
+    plt.subplot(3, 1, 1)
+    plt.plot(step, results_ds["logL"])
+    plt.xlabel("step")
+    plt.ylabel("logL")
+
+    plt.subplot(3, 1, 2)
+    plt.plot(step, results_ds["acc_rate"].T)
+    # plt.legend(legend)
+    plt.xlabel("step")
+    plt.ylabel("acceptance rate")
+
+    plt.subplot(3, 1, 3)
+    plt.plot(step, results_ds["bounds_err"].T)
+    plt.plot(step, results_ds["physics_err"].T)
+    plt.plot(step, results_ds["fm_err"].T)
+    plt.legend(["bounds error", "half-space error", "forward model error"])
+    plt.xlabel("step")
+    plt.ylabel("error ratio")
+
+    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/tests/logL-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def plot_acceptance_rate(input_ds, results_ds, save=False, out_filename=""):
     # cut results by step
     results_ds = results_ds.isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
@@ -135,7 +250,7 @@ def model_params_histogram(
     model_params = results_ds["model_params"].values
 
     # true model
-    true_model = input_ds["model_true"]
+    # true_model = input_ds["model_true"]
     # get most probable model from ds_results
     probable_model = results_ds["prob_params"]
 
@@ -155,28 +270,25 @@ def model_params_histogram(
         if param == "depth":
             unit_scale = 1000  # unit conversion to m
         inds = input_ds[param + "_inds"]
-        bins = unit_scale * np.linspace(
-            input_ds.attrs[param + "_bounds"][0],
-            input_ds.attrs[param + "_bounds"][1],
-            n_bins,
-        )
+        bounds = input_ds["param_bounds"][inds]
 
         for r_ind, p in enumerate(model_params[inds]):
+            bins = unit_scale * np.linspace(
+                bounds[r_ind][0],
+                bounds[r_ind][1],
+                n_bins,
+            )
             # param timeseries
             ax[r_ind, c_ind].hist(unit_scale * p, bins=bins, density=True)
             # true model
-            ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
+            # ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
             # most probable model
             ax[r_ind, c_ind].axvline(
                 unit_scale * probable_model[inds][r_ind], c="purple"
             )
             # bounds
-            ax[r_ind, c_ind].axvline(
-                unit_scale * input_ds.attrs[param + "_bounds"][0], c="black"
-            )
-            ax[r_ind, c_ind].axvline(
-                unit_scale * input_ds.attrs[param + "_bounds"][1], c="black"
-            )
+            ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
+            ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
 
             # axis labels
             ax[r_ind, c_ind].set_xlabel(param + " " + str(r_ind + 1))
@@ -283,11 +395,12 @@ def resulting_model_histogram(
         norm=LogNorm(),
         extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
         aspect="auto",
+        interpolation="none",
     )
 
     # plot true model overtop
-    true_model = np.array(true_model)
-    ax1.plot(true_model[:, 1], true_model[:, 0], c="red")
+    # true_model = np.array(true_model)
+    # ax1.plot(true_model[:, 1], true_model[:, 0], c="red")
 
     fig.colorbar(h, ax=ax1)
     ax1.set_xlabel("vel s (km/s)")
@@ -335,10 +448,12 @@ def plot_data_pred_histogram(
     fig, ax = plt.subplots()
     freqs = 1 / input_ds["period"]
 
-    plt.plot(freqs, input_ds["data_true"], zorder=3)
+    # plt.plot(freqs, input_ds["data_true"], zorder=3)
     plt.scatter(freqs, input_ds["data_obs"], zorder=3)
     # estimated error
-    yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
+    # *** depends if it's a percent error or not
+    # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
+    yerr = input_ds.attrs["sigma_data"]
     plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3)
 
     # flatten data_pred, repeat period

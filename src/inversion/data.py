@@ -23,7 +23,6 @@ class Data:
                 "period": {"dims": ["period"], "data": self.periods},
             },
             "data_vars": {
-                "data_true": {"dims": ["period"], "data": self.data_true},
                 "data_obs": {"dims": ["period"], "data": self.data_obs},
             },
             "attrs": {"sigma_data": self.sigma_data},
@@ -33,8 +32,8 @@ class Data:
 
 
 class FieldData(Data):
-    def __init__(self, path):
-        periods, phase_vels, stds = self.read_observed_data(path)
+    def __init__(self, periods, phase_vels, stds):
+        # periods, phase_vels, stds = self.read_observed_data(path)
 
         super().__init__(periods, phase_vels, stds)
 
@@ -95,7 +94,7 @@ class SyntheticData(Data):
     def generate_observed_data(self, periods, noise, model_params_obj, depth, vel_s):
         model_params = np.array(depth + vel_s)
         # use forward_model function
-        data_true, model_params = model_params_obj.forward_model(periods, model_params)
+        data_true = model_params_obj.forward_model(periods, model_params)
 
         # sigma_data is a percentage, so multiply by true data
         sigma_data = noise * data_true
@@ -105,6 +104,9 @@ class SyntheticData(Data):
     def get_data_dict(self):
         data_dict = super().get_data_dict()
         data_dict["data_vars"].update(
-            {"model_true": {"dims": ["n_model_params"], "data": self.model_true}}
+            {
+                "data_true": {"dims": ["period"], "data": self.data_true},
+                "model_true": {"dims": ["n_model_params"], "data": self.model_true},
+            }
         )
         return data_dict

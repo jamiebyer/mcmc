@@ -31,21 +31,22 @@ def setup_test_data(model_params, noise, depth, vel_s):
 
 def setup_test_model(n_layers):
     # set up example data
-    posterior_width = {
-        "depth": 0.05,
-        "vel_s": 0.05,
+    proposal_width = {
+        "depth": [0.05],
+        "vel_s": [0.05],
     }  # fractional step size (multiplied by param bounds width)
 
     # set up data and inversion params
     bounds = {
-        "depth": [0.001, 0.3],  # km
-        "vel_s": [0.1, 1.8],  # km/s
+        "depth": np.array([0.001, 0.3]),  # km
+        # "vel_s": [0.1, 1.8],  # km/s
+        "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
     }
     model_params_kwargs = {
         "n_layers": n_layers,
         "vpvs_ratio": 1.75,
         "param_bounds": bounds,
-        "posterior_width": posterior_width,
+        "proposal_width": proposal_width,
     }
     # model params
     model_params = DispersionCurveParams(**model_params_kwargs)
@@ -73,10 +74,10 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
     data = setup_test_data(model_params, noise, depth, vel_s)
 
     inversion_init_kwargs = {
-        "n_burn": 5000,
-        "n_burn": 0,
+        # "n_burn": 0,
+        "n_burn": 10000,
         "n_chunk": 500,
-        "n_mcmc": 20000,
+        "n_mcmc": 50000,
         "n_chains": 1,
         "beta_spacing_factor": 1.15,
         "out_filename": out_filename,
@@ -110,8 +111,39 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
 
 
 def test_data_setup():
+    """
     # test that variables are initialized properly
-    pass
+    # compare generated data and true data
+    """
+    n_layers = 1
+    noise = 0.05
+
+    if n_layers == 1:
+        # one layer
+        depth = [0.02]
+        vel_s = [0.4, 1.0]
+    elif n_layers == 2:
+        # two layers
+        depth = [0.02, 0.04]
+        vel_s = [0.2, 0.6, 1.0]
+
+    model_params = setup_test_model(n_layers)
+    data = setup_test_data(model_params, noise, depth, vel_s)
+
+    freqs = 1 / data.periods
+    plt.subplot(2, 1, 1)
+    plt.plot(freqs, data.data_true)
+    plt.scatter(freqs, data.data_obs)
+
+    plt.plot(freqs, data.data_true + noise * data.data_true, c="black")
+    plt.plot(freqs, data.data_true - noise * data.data_true, c="black")
+
+    plt.subplot(2, 1, 2)
+    plt.scatter(freqs, np.abs(data.data_true - data.data_obs))
+    plt.plot(freqs, noise * data.data_true)
+
+    # plt.title(np.std(data.data_obs))
+    plt.show()
 
 
 # TESTING BAYESIAN INVERSION
@@ -142,14 +174,17 @@ def test_run_inversions():
     """
     sample_prior = False
     set_starting_model = False
+    rotate = False
     n_layers = 2
-    noise = 0.05  # 0.02 # 0.05 # 0.1
+    noise = 0.02  # 0.02 # 0.05 # 0.1
 
     out_filename = (
         "/tests/test-run-"
         + str(sample_prior)
         + "-"
         + str(set_starting_model)
+        + "-"
+        + str(rotate)
         + "-"
         + str(n_layers)
         + "-"
@@ -166,7 +201,7 @@ def test_run_inversions():
     inversion.random_walk(
         model_params,
         proposal_distribution="cauchy",
-        rotate_params=False,
+        rotate_params=rotate,
     )
 
 

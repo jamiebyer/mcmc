@@ -24,12 +24,17 @@ class Model:
 
         self.model_params = model_params
         self.sigma_data = sigma_data
-        # print(1 / self.sigma_data**2)
-        self.cov_data_inv = np.diag(1 / self.sigma_data**2)  # ***
+
+        if isinstance(self.sigma_data, float):
+            self.cov_data_inv = np.diag(
+                self.model_params.n_model_params * [1 / self.sigma_data**2]
+            )
+        else:
+            self.cov_data_inv = np.diag(1 / self.sigma_data**2)  # ***
 
         # get generic param_bounds and posterior width from model_params
         self.param_bounds = model_params.assemble_param_bounds()
-        self.posterior_width = model_params.assemble_posterior_width()
+        self.proposal_width = model_params.assemble_proposal_width()
 
         n_params = self.model_params.n_model_params
 
@@ -39,11 +44,13 @@ class Model:
             # "n_prop": np.zeros(n_params),  # proposed
             "n_acc": 0,  # np.zeros(n_params),  # accepted
             "n_rej": 0,  # np.zeros(n_params),  # rejected
+            "n_bounds_err": 0,  # np.zeros(n_params),  # out of bounds error
+            "n_physics_err": 0,  # np.zeros(n_params),  # half-space error
             "n_fm_err": 0,  # np.zeros(n_params),  # forward model error
-            "n_hs_err": 0,  # np.zeros(n_params),  # half-space error
             "acc_rate": 0,  # np.zeros(n_params),
+            "bounds_err_ratio": 0,  # np.zeros(n_params),
+            "physics_err_ratio": 0,  # np.zeros(n_params),
             "fm_err_ratio": 0,  # np.zeros(n_params),
-            "fm_hs_ratio": 0,  # np.zeros(n_params),
         }
 
         self.beta = beta
@@ -107,6 +114,7 @@ class Model:
 
         # if rotate and (np.mod(n_step + 1, n_chunk) == 0):
         if rotate_params:
+            # update_rotation_matrix()
             # update rotation matrix
             if burn_in:
                 self.rotation_matrix, self.posterior_width = self.linear_rotation(
@@ -133,7 +141,7 @@ class Model:
             test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform()
         elif proposal_distribution == "cauchy":
             # cauchy distribution
-            test_model_params[ind] += self.posterior_width[ind] * np.tan(
+            test_model_params[ind] += self.proposal_width[ind] * np.tan(
                 np.pi * (np.random.uniform() - 0.5)
             )
 
@@ -147,22 +155,45 @@ class Model:
             test_model_params * self.param_bounds[:, 2]
         ) + self.param_bounds[:, 0]
 
-        # check bounds
-        valid_params = self.validate_bounds(test_model_params)
+        # sort layers
+        test_model_params = self.model_params.sort_layers(test_model_params)
 
-        acc = False
+        acc, valid_params = False, True
+        if sample_prior:
+            # for testing and sampling the prior, return perfect likelihood and empty data.
+            logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
+        else:
+            # validate params
+            if not self.validate_bounds(
+                test_model_params
+            ):  # check parameters are in bounds
+                self.acceptance_rate["n_bounds_err"] += 1
+                valid_params = False
+            elif not self.model_params.validate_physics(
+                test_model_params
+            ):  # validate physics
+                self.acceptance_rate["n_physics_err"] += 1
+                valid_params = False
+            else:
+                # run forward model to predict data for test_params
+                try:
+                    data_pred_new = self.model_params.forward_model(
+                        data.periods, test_model_params
+                    )
+                except (DispersionError, ZeroDivisionError, TypeError):  # as e:
+                    self.acceptance_rate["n_fm_err"] += 1
+                    valid_params = False
+                    # raise e
+
         if valid_params:
-            # assemble test params and check bounds
-
-            # run forward model
-
+            # calculate likelihood with predicted data
+            logL_new = self.get_likelihood(data, data_pred_new)
             # check acceptance criteria
-            acc, test_model_params = self.acceptance_criteria(
-                test_model_params, data, sample_prior=sample_prior, T=T
-            )
-
+            acc = self.acceptance_criteria(logL_new, T=T)
             if acc:
                 self.model_params.model_params = test_model_params.copy()
+                self.logL = logL_new
+                self.data_pred = data_pred_new
 
         self.update_acceptance_rate(acc)
         # self.stepsize_tuning(n_step)
@@ -315,39 +346,33 @@ class Model:
     # ACCEPTANCE CRITERIA
     #
 
-    def acceptance_criteria(self, test_model_params, data, T, sample_prior):
+    def get_likelihood(self, data, data_pred):
+        """
+        :param velocity_model:
+        :param data:
+        """
+        residuals = data.data_obs - data_pred
+
+        # cov_inv = data.data_cov
+        # cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
+        # logL = residuals.T @ cov_inv @ residuals
+
+        # for identical errors
+        # logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
+        logL = -np.sum((residuals**2) / (2 * self.sigma_data**2))
+
+        return logL
+
+    def acceptance_criteria(self, logL_new, T):
         """
         determine whether to accept the test model parameters.
         for sampling the prior, always accept the new parameters.
 
-        Run the forward model with the test parameters to validate parameters, and
-        to get predicted data from this model. Compute likelihood. Use metropolis-hastings
+        Compute likelihood. Use metropolis-hastings
         acceptance criteria to accept / reject based on model likelihood.
 
-        :param test_model_params:
-        :param ind:
-        :param data:
         :param T:
-        :param sample_prior:
         """
-        if sample_prior:
-            # for testing and sampling the prior, return perfect likelihood and empty data.
-            logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
-        elif not self.model_params.validate_physics():
-            # *** separate function for validating params and running forward model?
-            # check that halfspace is the fastest layer
-            # check specific criteria for params
-            self.model_params.validate_physics()
-            self.acceptance_rate["n_hs_err"] += 1
-        else:
-            try:
-                logL_new, data_pred_new, model_params = self.get_likelihood(
-                    test_model_params, data
-                )
-            except (DispersionError, ZeroDivisionError, TypingError):
-                # add specific condition here for failed forward model
-                self.acceptance_rate["n_fm_err"] += 1
-                return False, None
 
         # Compute likelihood ratio in log space
         # T=1 by default, unless performing optimization inversion
@@ -356,12 +381,7 @@ class Model:
 
         # Apply Metropolis-Hastings criterion (accept/reject)
         xi = np.random.uniform()  # between 0 and 1
-        if xi <= np.exp(dlogL):
-            self.logL = logL_new
-            self.data_pred = data_pred_new
-            return True, model_params
-        else:
-            return False, model_params
+        return xi <= np.exp(dlogL)
 
     def update_acceptance_rate(self, acc):
         """
@@ -380,30 +400,15 @@ class Model:
             self.acceptance_rate["acc_rate"] = self.acceptance_rate["n_acc"] / (
                 self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
             )
-
-    def get_likelihood(self, model_params, data):
-        """
-        :param velocity_model:
-        :param data:
-        """
-        try:
-            data_pred, model_params = self.model_params.forward_model(
-                data.periods, model_params
+            self.acceptance_rate["bounds_err_ratio"] = self.acceptance_rate[
+                "n_bounds_err"
+            ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
+            self.acceptance_rate["physics_err_ratio"] = self.acceptance_rate[
+                "n_physics_err"
+            ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
+            self.acceptance_rate["fm_err_ratio"] = self.acceptance_rate["n_fm_err"] / (
+                self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
             )
-            residuals = data.data_obs - data_pred
-
-            # cov_inv = data.data_cov
-            # cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
-            # logL = residuals.T @ cov_inv @ residuals
-
-            # for identical errors
-            # logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
-            logL = -np.sum((residuals**2) / (2 * self.sigma_data**2))
-
-            return logL, data_pred, model_params
-
-        except (DispersionError, ZeroDivisionError, TypeError) as e:
-            raise e
 
     #
     # STEPSIZE TUNING
@@ -430,17 +435,12 @@ class Model:
         self.posterior_width[low_inds] = self.posterior_width[low_inds] * 0.5
 
     def update_covariance_matrix(self, n_step, model_params):
-        # track sample mean
-        # add newest sample to current cov mat
-        # store sum without averaging
+        """
+        track sample mean
+        add newest sample to current cov mat
+        store sum without averaging
+        """
 
-        """
-        for ipar in range(Npar):
-            for jpar in range(Npar):
-                R[ipar, jpar] = Cov[ipar, jpar] / np.sqrt(
-                    Cov[ipar, ipar] * Cov[jpar, jpar]
-                )
-        """
         # update mean params
         mw = (model_params - self.param_bounds[:, 0]) / self.param_bounds[
             :, 2

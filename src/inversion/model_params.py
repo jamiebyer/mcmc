@@ -24,12 +24,12 @@ class ModelParams:
 
 class DispersionCurveParams(ModelParams):
 
-    def __init__(self, n_layers, param_bounds, posterior_width, vpvs_ratio):
+    def __init__(self, n_layers, param_bounds, proposal_width, vpvs_ratio):
         # initialize params
         self.n_layers = n_layers
         self.vpvs_ratio = vpvs_ratio
         self.param_bounds = param_bounds
-        self.posterior_width = posterior_width
+        self.proposal_width = proposal_width
 
         # get number of parameters
         self.n_model_params = (2 * self.n_layers) + 1
@@ -61,15 +61,24 @@ class DispersionCurveParams(ModelParams):
                     "dims": ["n_model_params"],
                     "data": np.arange(self.n_model_params),
                 },
+                "n_bounds": {
+                    "dims": ["n_bounds"],
+                    "data": np.arange(3),
+                },
             },
-            "data_vars": {},
+            "data_vars": {
+                "param_bounds": {
+                    "dims": ["n_model_params", "n_bounds"],
+                    "data": self.assemble_param_bounds(),
+                }
+            },
             "attrs": {
                 "n_layers": self.n_layers,
                 "vpvs_ratio": self.vpvs_ratio,
-                "depth_bounds": self.param_bounds["depth"],
-                "vel_s_bounds": self.param_bounds["vel_s"],
-                "depth_posterior_width": self.posterior_width["depth"],
-                "vel_s_posterior_width": self.posterior_width["vel_s"],
+                # "depth_bounds": self.param_bounds["depth"],
+                # "vel_s_bounds": self.param_bounds["vel_s"],
+                "depth_proposal_width": self.proposal_width["depth"],
+                "vel_s_proposal_width": self.proposal_width["vel_s"],
             },
         }
 
@@ -94,10 +103,18 @@ class DispersionCurveParams(ModelParams):
 
     def assemble_param_bounds(self):
         # reshape bounds to be the same shape as params
+        depth_bounds = self.param_bounds["depth"]
+        vel_s_bounds = self.param_bounds["vel_s"]
+
+        if len(self.param_bounds["depth"].shape) == 1:
+            depth_bounds = [depth_bounds] * self.n_layers
+        if len(self.param_bounds["vel_s"].shape) == 1:
+            vel_s_bounds = [vel_s_bounds] * (self.n_layers + 1)
+
         param_bounds = np.concatenate(
             (
-                [self.param_bounds["depth"]] * self.n_layers,
-                [self.param_bounds["vel_s"]] * (self.n_layers + 1),
+                depth_bounds,
+                vel_s_bounds,
             ),
             axis=0,
         )
@@ -108,40 +125,45 @@ class DispersionCurveParams(ModelParams):
 
         return param_bounds
 
-    def assemble_posterior_width(self):
+    def assemble_proposal_width(self):
         """
         from -- for each param.
         """
-        posterior_width = np.concatenate(
+        proposal_width = np.concatenate(
             (
-                [self.posterior_width["depth"]] * self.n_layers,
-                [self.posterior_width["vel_s"]] * (self.n_layers + 1),
+                [self.proposal_width["depth"]] * self.n_layers,
+                [self.proposal_width["vel_s"]] * (self.n_layers + 1),
             ),
             axis=0,
         )
-        return posterior_width
+        return proposal_width
 
-    def validate_physics(self):
+    def validate_physics(self, model_params):
+        # validate parameter bounds
+        # vel_s = model_params[self.vel_s_inds]
+        # return np.all(vel_s[-1] > vel_s[:-1])
         return True
 
-    def sort_layers(self, depths, params):
+    def sort_layers(self, model_params):
         """"""
         # generated params are depths of interfaces
         # sort depths and corresponding params (vel_s)
         # one of the layers will never move
         # define depths with interface at z=0
 
-        depths = np.concatenate(([0], depths))
-        inds = np.argsort(depths)
-        depths = depths[inds]
-        params = params[inds]
+        # sort layers
+        depth = model_params[self.depth_inds]
+        vel_s = model_params[self.vel_s_inds]
 
-        # positive or negative perturbation
+        # depth = np.concatenate(([0], depth))
+        inds = np.argsort(depth)
+        depth = depth[inds]
+        vel_s[1:] = vel_s[1:][inds]
 
-        # get thicknesses
-        thickness = np.concatenate((depths[1:] - depths[:-1], [0]))
+        model_params[self.depth_inds] = depth
+        model_params[self.vel_s_inds] = vel_s
 
-        return thickness, depths[1:], params
+        return model_params
 
     def forward_model(self, periods, model_params):
         """
@@ -151,18 +173,12 @@ class DispersionCurveParams(ModelParams):
         :param velocity model: velocity model for disba has the format
             [thickness (km), vel_p (km/s), vel_s (km/s), density (g/cm3)]
         :param model_params: model params to use to get phase dispersion
-
         """
-        # *** it doesn't really make sense to return the updated model_params
-        # maybe think of something better later. ***
-
-        # sort layers
         depth = model_params[self.depth_inds]
         vel_s = model_params[self.vel_s_inds]
-
-        thickness, depth, vel_s = self.sort_layers(depth, vel_s)
-        model_params[self.depth_inds] = depth
-        model_params[self.vel_s_inds] = vel_s
+        # get thicknesses
+        depth = np.concatenate(([0], depth))
+        thickness = np.concatenate((depth[1:] - depth[:-1], [0]))
 
         # assemble params into velocity model
         vel_p = self.get_vel_p(vel_s)
@@ -178,7 +194,7 @@ class DispersionCurveParams(ModelParams):
             pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
             phase_velocity = pd_rayleigh.velocity
 
-            return phase_velocity, model_params
+            return phase_velocity
         except (DispersionError, ZeroDivisionError, TypingError) as e:
             # *** track the type of error ***
             # failed to find root for fundamental mode

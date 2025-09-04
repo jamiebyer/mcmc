@@ -12,6 +12,9 @@ from copy import deepcopy
 import dask.dataframe as dd
 import time
 
+# from netCDF4 import Dataset
+import h5py
+
 
 class Inversion:
     def __init__(
@@ -154,16 +157,28 @@ class Inversion:
                     ),
                 },
                 "acc_rate": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    "dims": ["step"],
+                    # "dims": ["n_model_params", "step"],
+                    "data": np.empty(self.n_chunk),
+                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "bounds_err": {
+                    "dims": ["step"],
+                    # "dims": ["n_model_params", "step"],
+                    "data": np.empty(self.n_chunk),
+                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "physics_err": {
+                    "dims": ["step"],
+                    # "dims": ["n_model_params", "step"],
+                    "data": np.empty(self.n_chunk),
+                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
                 "fm_err": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "hs_err": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    "dims": ["step"],
+                    # "dims": ["n_model_params", "step"],
+                    "data": np.empty(self.n_chunk),
+                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
                 "data_pred": {
                     "dims": ["period", "step"],
@@ -271,18 +286,17 @@ class Inversion:
             while not valid_params:
                 # generate model params between bounds.
                 test_params = model.generate_model_params()
-
-                # get likelihood
                 try:
-                    logL, data_pred, test_params = model.get_likelihood(
-                        test_params, self.data
+                    data_pred = self.model_params.forward_model(
+                        self.data.periods, test_params
                     )
+                    logL_new = model.get_likelihood(self.data, data_pred)
                     valid_params = True
-                except (DispersionError, ZeroDivisionError) as _:
-                    valid_params = False
+                except (DispersionError, ZeroDivisionError, TypeError):  # as e:
+                    pass
 
             model.model_params.model_params = test_params
-            model.logL = logL
+            model.logL = logL_new
             model.data_pred = data_pred
 
             chains.append(model)
@@ -369,19 +383,31 @@ class Inversion:
                 # self.ds_storage["beta"][{"step": n_step}] = chain.beta
 
                 # acceptance rate
-                self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
+                # self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
+                #     chain.acceptance_rate["acc_rate"]
+                # )
+                self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
                     chain.acceptance_rate["acc_rate"]
                 )
-
-                """
                 # error ratio
-                self.ds_storage["data_vars"]["fm_err"]["data"] = chain.acceptance_rate[
-                    "n_fm_err"
-                ] / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
-                self.ds_storage["data_vars"]["hs_err"]["data"] = chain.acceptance_rate[
-                    "n_hs_err"
-                ] / (chain.acceptance_rate["n_acc"] + chain.acceptance_rate["n_rej"])
-                """
+                # self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
+                #    chain.acceptance_rate["bounds_err_ratio"]
+                # )
+                self.ds_storage["data_vars"]["bounds_err"]["data"][n_save] = (
+                    chain.acceptance_rate["bounds_err_ratio"]
+                )
+                # self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
+                #     chain.acceptance_rate["physics_err_ratio"]
+                # )
+                self.ds_storage["data_vars"]["physics_err"]["data"][n_save] = (
+                    chain.acceptance_rate["physics_err_ratio"]
+                )
+                # self.ds_storage["data_vars"]["fm_err"]["data"][:, n_save] = (
+                #     chain.acceptance_rate["fm_err_ratio"]
+                # )
+                self.ds_storage["data_vars"]["fm_err"]["data"][n_save] = (
+                    chain.acceptance_rate["fm_err_ratio"]
+                )
 
     def write_samples(self, n_steps, out_path):
         """
@@ -413,7 +439,8 @@ class Inversion:
 
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
 
-        ds.to_netcdf(out_path, compute=False)
+        # ds.to_netcdf(out_path, compute=False)
+        ds.to_netcdf(out_path, compute=True)
         # futures = client.compute(values)
 
         # update step number on dict storage
@@ -443,9 +470,7 @@ class Inversion:
             prob_params[p_ind] = prob_value
 
         # run forward problem to get predicted data for most probable model
-        data_pred, prob_params = self.model_params.forward_model(
-            self.data.periods, prob_params
-        )
+        data_pred = self.model_params.forward_model(self.data.periods, prob_params)
 
         # save probable params and data pred
         ds_full["prob_params"] = ("n_model_params", prob_params)

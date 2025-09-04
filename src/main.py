@@ -41,7 +41,8 @@ def run_inversion():
         },  # fractional step size (multiplied by param bounds width),
     }
     inversion_init_kwargs = {
-        "n_burn": 5000,
+        "n_burn": 0,
+        # "n_burn": 5000,
         "n_chunk": 500,
         "n_mcmc": 20000,
         "n_chains": 1,
@@ -105,10 +106,14 @@ def plot_inversion(file_name):
     results_ds = xr.open_dataset(results_path)
 
     # plot_covariance_matrix(input_ds, results_ds)
-    model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
+    model_params_timeseries(input_ds, results_ds, save=False, out_filename=file_name)
+    # model_params_autocorrelation(
+    #     input_ds, results_ds, save=False, out_filename=file_name
+    # )
     # model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":
@@ -120,5 +125,5 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    file_name = "test-run-False-False-2-0.05"
+    file_name = "test-run-False-False-False-2-0.02"
     plot_inversion(file_name)
