@@ -70,7 +70,7 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/time-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -145,7 +145,7 @@ def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/time-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -184,7 +184,7 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/logL-" + out_filename + ".png")
+        plt.savefig("figures/logL-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -220,7 +220,7 @@ def plot_acceptance_rate(input_ds, results_ds, save=False, out_filename=""):
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/time-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -297,7 +297,7 @@ def model_params_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/hist-" + out_filename + ".png")
+        plt.savefig("figures/hist-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -428,7 +428,7 @@ def resulting_model_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/profile-" + out_filename + ".png")
+        plt.savefig("figures/profile-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -470,7 +470,7 @@ def plot_data_pred_histogram(
     plt.legend(["data_true", "data_obs", "data_pred"])
 
     if save:
-        plt.savefig("figures/tests/data-" + out_filename + ".png")
+        plt.savefig("figures/data-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -480,7 +480,7 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     plt.imshow(results_ds["cov_mat"][:, :, -1])
 
     if save:
-        plt.savefig("figures/tests/cov-" + out_filename + ".png")
+        plt.savefig("figures/cov-" + out_filename + ".png")
     else:
         plt.show()
 

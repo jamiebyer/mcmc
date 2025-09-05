@@ -439,8 +439,8 @@ class Inversion:
 
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
 
-        # ds.to_netcdf(out_path, compute=False)
-        ds.to_netcdf(out_path, compute=True)
+        ds.to_netcdf(out_path, compute=False)
+        # ds.to_netcdf(out_path, compute=True)
         # futures = client.compute(values)
 
         # update step number on dict storage

@@ -12,56 +12,15 @@ from plotting.plot_dispersion_curve import *
 import xarray as xr
 
 
-def run_inversion():
-    """
-    run tests for:
-    - sample prior; uniform
-    - sample prior; cauchy
-    - start from true; low noise
-    - start from true; high noise
-    - generate true model; low noise
-    - generate true model; high noise
-    """
+np.random.seed(0)
 
-    set_starting_model = True
-    noise = 0.05  # real noise added to synthetic data (percentage)
-    sigma_data = 0.05  # assumed noise used in likelihood calculation (percentage)
 
-    # set up data and inversion params
-    model_params_kwargs = {
-        "n_layers": 2,
-        "vpvs_ratio": 1.75,
-        "param_bounds": {
-            "depth": [0.001, 0.3],  # km
-            "vel_s": [0.1, 1.8],  # km/s
-        },
-        "posterior_width": {
-            "depth": 0.1,
-            "vel_s": 0.1,
-        },  # fractional step size (multiplied by param bounds width),
-    }
-    inversion_init_kwargs = {
-        "n_burn": 0,
-        # "n_burn": 5000,
-        "n_chunk": 500,
-        "n_mcmc": 20000,
-        "n_chains": 1,
-        "beta_spacing_factor": 1.15,
-    }
-    inversion_run_kwargs = {
-        "proposal_distribution": "cauchy",
-        "rotate_params": True,
-    }
-
-    # model params
-    model_params = DispersionCurveParams(**model_params_kwargs)
-
-    # setup data
+def setup_test_data(model_params, noise, depth, vel_s):
     n_data = 50
     periods = np.flip(1 / np.logspace(0, 1.1, n_data))
 
-    depth = [0.02, 0.04]
-    vel_s = [0.2, 0.6, 1.0]
+    # run synthetic data that uses inversion calculations for vel_p and density
+    # and optionally, setting vel_p and density exactly.
 
     data = SyntheticData(
         periods,
@@ -70,6 +29,64 @@ def run_inversion():
         depth=depth,
         vel_s=vel_s,
     )
+
+    return data
+
+
+def setup_test_model(n_layers):
+    # set up example data
+    proposal_width = {
+        "depth": [0.05],
+        "vel_s": [0.05],
+    }  # fractional step size (multiplied by param bounds width)
+
+    # set up data and inversion params
+    bounds = {
+        "depth": np.array([0.001, 0.3]),  # km
+        # "vel_s": [0.1, 1.8],  # km/s
+        "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
+    }
+    model_params_kwargs = {
+        "n_layers": n_layers,
+        "vpvs_ratio": 1.75,
+        "param_bounds": bounds,
+        "proposal_width": proposal_width,
+    }
+    # model params
+    model_params = DispersionCurveParams(**model_params_kwargs)
+
+    return model_params
+
+
+def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filename):
+    """
+    real noise added to synthetic data (percentage)
+    assumed noise used in likelihood calculation (percentage)
+    """
+    sigma_data = noise
+
+    if n_layers == 1:
+        # one layer
+        depth = [0.02]
+        vel_s = [0.4, 1.0]
+    elif n_layers == 2:
+        # two layers
+        depth = [0.02, 0.04]
+        vel_s = [0.2, 0.6, 1.0]
+
+    model_params = setup_test_model(n_layers)
+    data = setup_test_data(model_params, noise, depth, vel_s)
+
+    inversion_init_kwargs = {
+        # "n_burn": 0,
+        "n_burn": 10000,
+        "n_chunk": 500,
+        "n_mcmc": 50000,
+        "n_chains": 1,
+        "beta_spacing_factor": 1.15,
+        #"out_filename": out_filename,
+    }
+
     model_kwargs = {"sigma_data": sigma_data * data.data_obs}
 
     # run inversion
@@ -91,29 +108,65 @@ def run_inversion():
             model.get_likelihood(test_model_params, data)
         )
 
+    return inversion, model_params
+
+
+def run_inversion():
+    """
+    - Run with sampling prior. Run with setting the starting model, run without.
+        - Run with 1 layer, 2 layers.
+        - Run with low noise, medium noise, high noise.
+    """
+    sample_prior = False
+    set_starting_model = False
+    rotate = False
+    n_layers = 2
+    noise = 0.02  # 0.02 # 0.05 # 0.1
+
+    out_filename = (
+        "/tests/test-run-"
+        + str(sample_prior)
+        + "-"
+        + str(set_starting_model)
+        + "-"
+        + str(rotate)
+        + "-"
+        + str(n_layers)
+        + "-"
+        + str(noise)
+    )
+
+    inversion, model_params = basic_inversion(
+        n_layers=n_layers,
+        noise=noise,
+        sample_prior=sample_prior,
+        set_starting_model=set_starting_model,
+        out_filename=out_filename,
+    )
     inversion.random_walk(
         model_params,
-        **inversion_run_kwargs,
+        proposal_distribution="cauchy",
+        rotate_params=rotate,
     )
 
 
 def plot_inversion(file_name):
 
-    input_path = "./results/inversion/tests/input-" + file_name + ".nc"
-    results_path = "./results/inversion/tests/results-" + file_name + ".nc"
+    input_path = "./results/inversion/input-" + file_name + ".nc"
+    results_path = "./results/inversion/results-" + file_name + ".nc"
 
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
 
     # plot_covariance_matrix(input_ds, results_ds)
-    model_params_timeseries(input_ds, results_ds, save=False, out_filename=file_name)
+    model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
     # model_params_autocorrelation(
     #     input_ds, results_ds, save=False, out_filename=file_name
     # )
-    # model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
+    plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":
@@ -125,5 +178,6 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    file_name = "test-run-False-False-False-2-0.02"
+    file_name = "1757089084"
     plot_inversion(file_name)
+
