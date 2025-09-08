@@ -214,7 +214,7 @@ def model_params_autocorrelation(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/time-" + out_filename + ".png")
     else:
         plt.show()
 

@@ -447,7 +447,6 @@ class Inversion:
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
 
         ds.to_netcdf(out_path, compute=False)
-
         # update step number on dict storage
         self.ds_storage["coords"]["step"]["data"] += self.n_chunk
 
