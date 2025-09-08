@@ -106,10 +106,10 @@ class DispersionCurveParams(ModelParams):
         depth_bounds = self.param_bounds["depth"]
         vel_s_bounds = self.param_bounds["vel_s"]
 
-        if len(self.param_bounds["depth"].shape) == 1:
-            depth_bounds = [depth_bounds] * self.n_layers
-        if len(self.param_bounds["vel_s"].shape) == 1:
-            vel_s_bounds = [vel_s_bounds] * (self.n_layers + 1)
+        if len(depth_bounds.shape) == 1:
+            depth_bounds = depth_bounds * self.n_layers
+        if len(vel_s_bounds.shape) == 1:
+            vel_s_bounds = vel_s_bounds * (self.n_layers + 1)
 
         param_bounds = np.concatenate(
             (
@@ -129,13 +129,23 @@ class DispersionCurveParams(ModelParams):
         """
         from -- for each param.
         """
+        # reshape bounds to be the same shape as params
+        depth_width = self.proposal_width["depth"]
+        vel_s_width = self.proposal_width["vel_s"]
+
+        if len(depth_width) == 1:
+            depth_width = depth_width * self.n_layers
+        if len(vel_s_width) == 1:
+            vel_s_width = vel_s_width * (self.n_layers + 1)
+
         proposal_width = np.concatenate(
             (
-                [self.proposal_width["depth"]] * self.n_layers,
-                [self.proposal_width["vel_s"]] * (self.n_layers + 1),
+                depth_bounds,
+                vel_s_bounds,
             ),
             axis=0,
         )
+
         return proposal_width
 
     def validate_physics(self, model_params):

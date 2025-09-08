@@ -28,6 +28,7 @@ class Inversion:
         n_chains=1,
         beta_spacing_factor=None,
         out_filename=None,
+        set_starting_model=False,
     ):
         """
         :param n_data: number of data observed.
@@ -60,9 +61,7 @@ class Inversion:
         self.model_params = model_params
         self.n_chains = n_chains
         self.initialize_chains(
-            model_params,
-            sigma_data,
-            beta_spacing_factor,
+            model_params, sigma_data, beta_spacing_factor, set_starting_model
         )
 
         # set initial likelihood ***
@@ -261,7 +260,7 @@ class Inversion:
         model_params,
         sigma_data,
         beta_spacing_factor,
-        # optimize_starting_model=False,
+        set_starting_model=False,
     ):
         """
         initialize each of the chains, setting starting parameters, beta values, initial rotation params
@@ -281,19 +280,27 @@ class Inversion:
                 betas[ind],
             )
 
-            # initialize model params
-            valid_params = False
-            while not valid_params:
-                # generate model params between bounds.
-                test_params = model.generate_model_params()
-                try:
-                    data_pred = self.model_params.forward_model(
-                        self.data.periods, test_params
-                    )
-                    logL_new = model.get_likelihood(self.data, data_pred)
-                    valid_params = True
-                except (DispersionError, ZeroDivisionError, TypeError):  # as e:
-                    pass
+            if set_starting_model:
+                test_params = self.data.model_true
+                data_pred = self.model_params.forward_model(
+                    self.data.periods, test_params
+                )
+                logL_new = model.get_likelihood(self.data, data_pred)
+                valid_params = True
+            else:
+                # initialize model params
+                valid_params = False
+                while not valid_params:
+                    # generate model params between bounds.
+                    test_params = model.generate_model_params()
+                    try:
+                        data_pred = self.model_params.forward_model(
+                            self.data.periods, test_params
+                        )
+                        logL_new = model.get_likelihood(self.data, data_pred)
+                        valid_params = True
+                    except (DispersionError, ZeroDivisionError, TypeError):
+                        pass
 
             model.model_params.model_params = test_params
             model.logL = logL_new
@@ -439,9 +446,7 @@ class Inversion:
 
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
 
-        # ds.to_netcdf(out_path, compute=False)
-        ds.to_netcdf(out_path, compute=True)
-        # futures = client.compute(values)
+        ds.to_netcdf(out_path, compute=False)
 
         # update step number on dict storage
         self.ds_storage["coords"]["step"]["data"] += self.n_chunk

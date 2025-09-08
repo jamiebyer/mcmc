@@ -2,9 +2,68 @@ import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib.colors import LogNorm
 from matplotlib.gridspec import GridSpec
+import json
+import os
 
 
-def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
+def plot_results(input_ds, results_ds, out_filename):
+    # make a folder for all plotting output
+    if not os.path.isdir("./figures/" + out_filename):
+        os.mkdir("./figures/" + out_filename)
+
+    save_inversion_info(input_ds, results_ds)
+
+    # plot_covariance_matrix(input_ds, results_ds)
+    model_params_timeseries(input_ds, results_ds, save=True, out_filename=out_filename)
+    model_params_autocorrelation(
+        input_ds, results_ds, save=True, out_filename=out_filename
+    )
+    model_params_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    resulting_model_histogram(
+        input_ds, results_ds, save=True, out_filename=out_filename
+    )
+    plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
+
+
+def save_inversion_info(input_ds, results_ds, out_filename=""):
+    """
+    save input model
+    write input info to file
+    """
+    # n_steps
+    # length of computation
+    # rotation
+    # starting at true model
+    # how much noise for synthetic data
+    # field data vs. synthetic
+
+    # save as json?
+    # print(results_ds)
+
+    output_dict = {
+        "param_bounds": input_ds["param_bounds"],
+        "model_true": input_ds["model_true"],
+        "n_layers": input_ds.attrs["n_layers"],
+        "vpvs_ratio": input_ds.attrs["vpvs_ratio"],
+        # "depth_posterior_width": input_ds.attrs["depth_posterior_width"],
+        # "vel_s_posterior_width": input_ds.attrs["vel_s_posterior_width"],
+    }
+
+    # json_str = json.dumps(output_dict, indent=4)
+    with open("figures/" + out_filename + "/info-" + out_filename + ".json", "w") as f:
+        # f.write(json_str)
+        pass
+
+
+def model_params_timeseries(
+    input_ds,
+    results_ds,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+):
     """
     plot model params vs. time step.
 
@@ -17,7 +76,7 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     # use input_ds to interpret results_ds
 
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -26,9 +85,11 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     step = results_ds["step"]
 
     # true model
-    true_model = input_ds["model_true"]
+    if plot_true_model:
+        true_model = input_ds["model_true"]
     # get most probable model from ds_results
-    probable_model = results_ds["prob_params"]
+    if plot_prob_model:
+        probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -55,12 +116,13 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
                 s=2,
             )
             # true model
-            ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
+            if plot_true_model:
+                ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
             # most probable model
-            # ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+            if plot_prob_model:
+                ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
             # bounds
-            ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
-            ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
+            ax[r_ind, c_ind].set_ylim([bounds[r_ind][0], bounds[r_ind][1]])
 
             # axis labels
             ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
@@ -70,12 +132,19 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/time-" + out_filename + ".png")
     else:
         plt.show()
 
 
-def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=""):
+def model_params_autocorrelation(
+    input_ds,
+    results_ds,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+):
     """
     plot model params vs. time step.
 
@@ -88,7 +157,7 @@ def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=
     # use input_ds to interpret results_ds
 
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -97,9 +166,11 @@ def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=
     step = results_ds["step"]
 
     # true model
-    # true_model = input_ds["model_true"]
+    if plot_true_model:
+        true_model = input_ds["model_true"]
     # get most probable model from ds_results
-    probable_model = results_ds["prob_params"]
+    if plot_prob_model:
+        probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -120,9 +191,7 @@ def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=
         for r_ind, p in enumerate(model_params[inds]):
             legend.append(param + " " + str(r_ind + 1))
             # param timeseries
-            print(p)
             autocorr = np.correlate(p, p, mode="full")
-            print(autocorr)
             ax[r_ind, c_ind].plot(
                 # step,
                 autocorr,
@@ -152,7 +221,7 @@ def model_params_autocorrelation(input_ds, results_ds, save=False, out_filename=
 
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -184,49 +253,19 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/logL-" + out_filename + ".png")
-    else:
-        plt.show()
-
-
-def plot_acceptance_rate(input_ds, results_ds, save=False, out_filename=""):
-    # cut results by step
-    results_ds = results_ds.isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
-    )
-
-    # use results_ds to get model params
-    model_params = results_ds["model_params"].values
-    step = results_ds["step"]
-
-    plt.subplot(1, 1)
-    plt.plot(step, results_ds["logL"])
-    plt.set_xlabel("step")
-    plt.set_ylabel("logL")
-
-    plt.subplot(2, 1)
-    plt.plot(step, results_ds["acc_rate"].T)
-    plt.legend(legend)
-    plt.set_xlabel("step")
-    plt.set_ylabel("acceptance rate")
-
-    plt.subplot(3, 1)
-    plt.plot(step, results_ds["err_ratio"].T)
-    plt.legend(legend)
-    plt.set_xlabel("step")
-    plt.set_ylabel("error ratio")
-
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
-    plt.tight_layout()
-
-    if save:
-        plt.savefig("figures/tests/time-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/logL-" + out_filename + ".png")
     else:
         plt.show()
 
 
 def model_params_histogram(
-    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+    input_ds,
+    results_ds,
+    n_bins=100,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
 ):
     """
     plot model params vs. time step.
@@ -242,7 +281,7 @@ def model_params_histogram(
     # use input_ds to interpret results_ds
 
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -250,9 +289,11 @@ def model_params_histogram(
     model_params = results_ds["model_params"].values
 
     # true model
-    # true_model = input_ds["model_true"]
+    if plot_true_model:
+        true_model = input_ds["model_true"]
     # get most probable model from ds_results
-    probable_model = results_ds["prob_params"]
+    if plot_prob_model:
+        probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -281,14 +322,15 @@ def model_params_histogram(
             # param timeseries
             ax[r_ind, c_ind].hist(unit_scale * p, bins=bins, density=True)
             # true model
-            # ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
+            if plot_true_model:
+                ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
             # most probable model
-            ax[r_ind, c_ind].axvline(
-                unit_scale * probable_model[inds][r_ind], c="purple"
-            )
+            if plot_prob_model:
+                ax[r_ind, c_ind].axvline(
+                    unit_scale * probable_model[inds][r_ind], c="purple"
+                )
             # bounds
-            ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
-            ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
+            ax[r_ind, c_ind].set_xlim([bounds[r_ind][0], bounds[r_ind][1]])
 
             # axis labels
             ax[r_ind, c_ind].set_xlabel(param + " " + str(r_ind + 1))
@@ -297,7 +339,7 @@ def model_params_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/hist-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/hist-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -310,7 +352,7 @@ def resulting_model_histogram(
     with the histogram of probability for the depth of the layer
     """
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -321,16 +363,19 @@ def resulting_model_histogram(
     true_params = input_ds["model_true"].values
 
     # define hist bins between bounds
+    # use param inds to get depth, and use min and max of all depth bounds
+    depth_bounds = input_ds["param_bounds"][input_ds["depth_inds"]]
     depth_bins = (
         np.linspace(
-            input_ds.attrs["depth_bounds"][0],
-            input_ds.attrs["depth_bounds"][1],
+            np.min(depth_bounds[:, 0]),
+            np.max(depth_bounds[:, 1]),
             n_bins,
         )
         * 1000
     )  # unit conversion
+    vel_s_bounds = input_ds["param_bounds"][input_ds["vel_s_inds"]]
     vel_s_bins = np.linspace(
-        input_ds.attrs["vel_s_bounds"][0], input_ds.attrs["vel_s_bounds"][1], n_bins
+        np.min(vel_s_bounds[:, 0]), np.max(vel_s_bounds[:, 1]), n_bins
     )
     counts = np.zeros((n_bins, n_bins))
 
@@ -348,8 +393,7 @@ def resulting_model_histogram(
         (
             np.zeros((1, n_steps)),
             depth,
-            np.full((1, n_steps), input_ds.attrs["depth_bounds"][1])
-            * 1000,  # unit conversion
+            np.full((1, n_steps), np.max(depth_bounds[:, 1])) * 1000,  # unit conversion
         ),
         axis=0,
     )
@@ -375,7 +419,7 @@ def resulting_model_histogram(
     true_depth = true_params[depth_inds] * 1000
     true_vel_s = true_params[vel_s_inds]
     true_depth_plotting = np.concatenate(
-        ([0], true_depth, [input_ds.attrs["depth_bounds"][1] * 1000])
+        ([0], true_depth, [np.max(depth_bounds[:, 1]) * 1000])
     )
 
     true_model = []
@@ -417,8 +461,8 @@ def resulting_model_histogram(
 
     ax2.set_ylim(
         [
-            input_ds.attrs["depth_bounds"][0] * 1000,
-            input_ds.attrs["depth_bounds"][1] * 1000,
+            np.min(depth_bounds[:, 0]) * 1000,
+            np.max(depth_bounds[:, 1]) * 1000,
         ]
     )
     plt.gca().invert_yaxis()
@@ -428,7 +472,7 @@ def resulting_model_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/tests/profile-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/profile-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -441,7 +485,7 @@ def plot_data_pred_histogram(
     plot true data, observed data, and predicted data for the most probable model.
     """
     # cut results by step
-    results_ds = results_ds.isel(
+    results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
@@ -454,7 +498,7 @@ def plot_data_pred_histogram(
     # *** depends if it's a percent error or not
     # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
     yerr = input_ds.attrs["sigma_data"]
-    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3)
+    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3, c="orange")
 
     # flatten data_pred, repeat period
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
@@ -470,17 +514,16 @@ def plot_data_pred_histogram(
     plt.legend(["data_true", "data_obs", "data_pred"])
 
     if save:
-        plt.savefig("figures/tests/data-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/data-" + out_filename + ".png")
     else:
         plt.show()
 
 
 def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
-    # print(results_ds["cov_mat"][:, :, -1].values)
     plt.imshow(results_ds["cov_mat"][:, :, -1])
 
     if save:
-        plt.savefig("figures/tests/cov-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/cov-" + out_filename + ".png")
     else:
         plt.show()
 
