@@ -148,6 +148,7 @@ def run_inversion():
         rotate_params=rotate,
     )
 
+#####
 
 def plot_inversion(file_name):
 
@@ -157,15 +158,17 @@ def plot_inversion(file_name):
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
 
+    plot_results(input_ds, results_ds, out_filename=file_name)
+
     # plot_covariance_matrix(input_ds, results_ds)
-    model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
+    # model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
     # model_params_autocorrelation(
     #     input_ds, results_ds, save=False, out_filename=file_name
     # )
-    model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    # model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":
@@ -177,6 +180,7 @@ if __name__ == "__main__":
 
     # run_inversion()
 
+<<<<<<< HEAD
     file_name = "1757101041"
     # file_name = "1757101120"
     # file_name = "1757101177"
@@ -184,5 +188,12 @@ if __name__ == "__main__":
     # file_name = "1757101401"
     # file_name = "1757101461"
     # file_name = "1757101501"
+=======
+<<<<<<< HEAD
+    file_name = "1757354761"
+=======
+    file_name = "1757089084"
+>>>>>>> 72725ff4e3eda65b0d5a69d145669b20841b0f98
+>>>>>>> feffb2ae12657fd40f5046b5056d87c2af4a9e08
     plot_inversion(file_name)
 

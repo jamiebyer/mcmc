@@ -54,7 +54,7 @@ def setup_test_model(n_layers):
     return model_params
 
 
-def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filename):
+def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filename=""):
     """
     real noise added to synthetic data (percentage)
     assumed noise used in likelihood calculation (percentage)
@@ -75,12 +75,13 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
 
     inversion_init_kwargs = {
         # "n_burn": 0,
-        "n_burn": 10000,
+        "n_burn": 1000,
         "n_chunk": 500,
-        "n_mcmc": 50000,
+        "n_mcmc": 5000,
         "n_chains": 1,
         "beta_spacing_factor": 1.15,
         "out_filename": out_filename,
+        "set_starting_model": set_starting_model,
     }
 
     model_kwargs = {"sigma_data": sigma_data * data.data_obs}
@@ -92,17 +93,6 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
         **model_kwargs,
         **inversion_init_kwargs,
     )
-
-    if set_starting_model:
-        # *** move to inversion ***
-        # set initial model to true model
-        model = inversion.chains[0]
-        test_model_params = np.concatenate((depth, vel_s))
-
-        # set initial likelihood
-        model.logL, model.data_pred, model.model_params.model_params = (
-            model.get_likelihood(test_model_params, data)
-        )
 
     return inversion, model_params
 
@@ -178,25 +168,12 @@ def test_run_inversions():
     n_layers = 2
     noise = 0.02  # 0.02 # 0.05 # 0.1
 
-    out_filename = (
-        "/tests/test-run-"
-        + str(sample_prior)
-        + "-"
-        + str(set_starting_model)
-        + "-"
-        + str(rotate)
-        + "-"
-        + str(n_layers)
-        + "-"
-        + str(noise)
-    )
-
     inversion, model_params = basic_inversion(
         n_layers=n_layers,
         noise=noise,
         sample_prior=sample_prior,
         set_starting_model=set_starting_model,
-        out_filename=out_filename,
+        # out_filename=out_filename,
     )
     inversion.random_walk(
         model_params,
@@ -300,6 +277,10 @@ def test_PC_rotations():
 
 def test_layer_swap():
     # propose parameters where the lower layer crosses the upper layer
+    # create inversion object
+    # use sort layers / perturb params, but give the new params.
+    # swaps and new swap isn't in bounds?
+    # swap and is accepted, swap and not accepted...
     pass
 
 
