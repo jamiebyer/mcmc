@@ -28,7 +28,7 @@ def model_params_timeseries(input_ds, results_ds, save=False, out_filename=""):
     # true model
     true_model = input_ds["model_true"]
     # get most probable model from ds_results
-    probable_model = results_ds["prob_params"]
+    # probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -252,7 +252,7 @@ def model_params_histogram(
     # true model
     # true_model = input_ds["model_true"]
     # get most probable model from ds_results
-    probable_model = results_ds["prob_params"]
+    # probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -283,9 +283,9 @@ def model_params_histogram(
             # true model
             # ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
             # most probable model
-            ax[r_ind, c_ind].axvline(
-                unit_scale * probable_model[inds][r_ind], c="purple"
-            )
+            # ax[r_ind, c_ind].axvline(
+            #     unit_scale * probable_model[inds][r_ind], c="purple"
+            # )
             # bounds
             ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
             ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
@@ -454,7 +454,7 @@ def plot_data_pred_histogram(
     # *** depends if it's a percent error or not
     # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
     yerr = input_ds.attrs["sigma_data"]
-    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3)
+    # plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3)
 
     # flatten data_pred, repeat period
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])

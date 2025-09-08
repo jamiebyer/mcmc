@@ -78,10 +78,9 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
     data = setup_test_data(model_params, noise, depth, vel_s)
 
     inversion_init_kwargs = {
-        # "n_burn": 0,
-        "n_burn": 10000,
+        "n_burn": 50000,
         "n_chunk": 500,
-        "n_mcmc": 50000,
+        "n_mcmc": 1000000,
         "n_chains": 1,
         "beta_spacing_factor": 1.15,
         #"out_filename": out_filename,
@@ -121,7 +120,7 @@ def run_inversion():
     set_starting_model = False
     rotate = False
     n_layers = 2
-    noise = 0.02  # 0.02 # 0.05 # 0.1
+    noise = 0.05  # 0.02 # 0.05 # 0.1
 
     out_filename = (
         "/tests/test-run-"
@@ -178,6 +177,12 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    file_name = "1757089084"
+    file_name = "1757101041"
+    # file_name = "1757101120"
+    # file_name = "1757101177"
+    # file_name = "1757101220"
+    # file_name = "1757101401"
+    # file_name = "1757101461"
+    # file_name = "1757101501"
     plot_inversion(file_name)
 
