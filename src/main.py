@@ -170,6 +170,5 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    # file_name = "1757788255"
-    file_name = "1757795845"
+    file_name = "1757089084"
     plot_inversion(file_name)
