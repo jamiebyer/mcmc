@@ -12,6 +12,7 @@ class Model:
         self,
         model_params,
         sigma_data,
+        n_cov_chunk,
         beta=None,
     ):
         """
@@ -53,16 +54,16 @@ class Model:
             "fm_err_ratio": 0,  # np.zeros(n_params),
         }
 
-        self.beta = beta
+        self.beta = beta  # beta for parallel tempering
 
+        # params for rotating params
+        self.n_cov_chunk = n_cov_chunk
         self.rotation_matrix = np.eye(n_params)
         self.params_sum = np.zeros(n_params)
+        self.params_prev = np.zeros(n_params)  # saving the previous accepted params
         self.cov_mat_sum = np.zeros((n_params, n_params))
-        self.cov_mat = np.zeros((n_params, n_params))
-
-        # variables for storing and computing covariance matrix after burn-in
-        # self.rot_mat = np.eye(self.n_params)  # initialize rotation matrix
-        # self.n_cov = 0  # initialize the dividing number for covariance
+        self.cov_mat = np.zeros((n_params, n_params))  # model covariance matrix
+        self.n_cov = 0  # number of covariance matrices calculated
 
     def validate_bounds(self, model_params):
         """
@@ -92,11 +93,12 @@ class Model:
         data,
         proposal_distribution,
         n_step,
-        burn_in,
+        n_burn,
         n_chunk,
         T=1,
         rotate_params=True,
         sample_prior=False,
+        linear_rotation=False,
     ):
         """
         loop over each model parameter, perturb its value, validate the value,
@@ -114,17 +116,19 @@ class Model:
 
         # if rotate and (np.mod(n_step + 1, n_chunk) == 0):
         if rotate_params:
-            # update_rotation_matrix()
+            burn_in = n_step < n_burn
             # update rotation matrix
-            if burn_in:
-                self.rotation_matrix, self.posterior_width = self.linear_rotation(
+            if burn_in and linear_rotation:
+                self.rotation_matrix, self.proposal_width = self.linear_rotation(
                     model_params_norm, data
                 )
-            else:
+            elif (n_step < (n_burn + self.n_cov_chunk)) & (
+                n_step % self.n_cov_chunk == 0
+            ):
                 # get rotation matrix and step size from correlation matrix
                 # lambd, U = np.linalg.eig(self.cov_mat)
-                self.rotation_matrix, self.posterior_width = (
-                    self.update_covariance_matrix(n_step, model_params_norm)
+                self.rotation_matrix, self.proposal_width = (
+                    self.update_covariance_matrix(model_params_norm)
                 )
 
         # *** pick a random parameter to perturb
@@ -136,6 +140,7 @@ class Model:
         else:
             test_model_params = model_params_norm.copy()
 
+        # perturb one param from proposal
         if proposal_distribution == "uniform":
             # uniform distribution
             test_model_params[ind] = self.param_bounds[ind][0] + np.random.uniform()
@@ -180,17 +185,20 @@ class Model:
                     data_pred_new = self.model_params.forward_model(
                         data.periods, test_model_params
                     )
-                except (DispersionError, ZeroDivisionError, TypeError):  # as e:
+                except (DispersionError, ZeroDivisionError, TypeError):
                     self.acceptance_rate["n_fm_err"] += 1
                     valid_params = False
-                    # raise e
 
         if valid_params:
             # calculate likelihood with predicted data
-            logL_new = self.get_likelihood(data, data_pred_new)
+            logL_new = Model.get_likelihood(data, data_pred_new, self.sigma_data)
             # check acceptance criteria
             acc = self.acceptance_criteria(logL_new, T=T)
             if acc:
+                self.params_prev = (
+                    self.model_params.model_params - self.param_bounds[:, 0]
+                ) / self.param_bounds[:, 2]
+
                 self.model_params.model_params = test_model_params.copy()
                 self.logL = logL_new
                 self.data_pred = data_pred_new
@@ -202,22 +210,32 @@ class Model:
     # PARAM ROTATIONS
     #
 
-    def update_rotation_matrix(self, model_params, data, burn_in, n_step):
+    def update_covariance_matrix(self, model_params_norm):
         """
-        before  burn-in use Jacobian
-        rotate to PC space (after burn in)
-        get posterior width / scale for propsal distribution
-        get rotation matrix and step size / standard deviation
+        track sample mean
+        add newest sample to current cov mat
+        store sum without averaging
         """
 
-        # check if it's burn in
-        # if it's before burning, do a linear rotation
-        if burn_in:
-            U, lambd = self.linear_rotation(model_params, data)
-        else:
-            # get rotation matrix and step size from correlation matrix
-            # lambd, U = np.linalg.eig(self.cov_mat)
-            U, lambd = self.update_covariance_matrix(n_step)
+        # take difference between current params and previous params
+        params_diff = model_params_norm - self.params_prev
+
+        if np.all(params_diff == 0):
+            return self.rotation_matrix, self.proposal_width
+
+        # for each combination of params
+        # add to the sum
+        self.cov_mat_sum += np.outer(np.transpose(params_diff), params_diff)
+
+        # divide cov mat by number of samples
+        self.cov_mat = self.cov_mat_sum / (self.n_cov + 1)
+        self.n_cov += 1
+
+        U, s, _ = np.linalg.svd(
+            self.cov_mat
+        )  # rotate it to its Singular Value Decomposition
+        # ut = np.transpose(u)
+        lambd = np.sqrt(s)  # pcsd
 
         return U, lambd
 
@@ -346,7 +364,8 @@ class Model:
     # ACCEPTANCE CRITERIA
     #
 
-    def get_likelihood(self, data, data_pred):
+    @staticmethod
+    def get_likelihood(data, data_pred, sigma_data):
         """
         :param velocity_model:
         :param data:
@@ -359,7 +378,7 @@ class Model:
 
         # for identical errors
         # logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
-        logL = -np.sum((residuals**2) / (2 * self.sigma_data**2))
+        logL = -np.sum((residuals**2) / (2 * sigma_data**2))
 
         return logL
 
@@ -429,36 +448,47 @@ class Model:
         low_inds = (self.acceptance_rate["acc_rate"] > 0) & (
             self.acceptance_rate["acc_rate"] < 0.2
         )
-        self.posterior_width[high_inds] = (
-            self.posterior_width[high_inds] * 1.5
+        self.proposal_width[high_inds] = (
+            self.proposal_width[high_inds] * 1.5
         )  # gamma*diff
-        self.posterior_width[low_inds] = self.posterior_width[low_inds] * 0.5
+        self.proposal_width[low_inds] = self.proposal_width[low_inds] * 0.5
 
-    def update_covariance_matrix(self, n_step, model_params):
+
+class SyntheticModel(Model):
+    pass
+
+
+class GeneratedModel(Model):
+
+    def generate_true_model(self, periods, noise, bounds, n_layers):
         """
-        track sample mean
-        add newest sample to current cov mat
-        store sum without averaging
+        generating random model
         """
+        valid_params = False
+        while not valid_params:
+            depth = np.random.uniform(
+                bounds["depth"][0],
+                bounds["depth"][1],
+                n_layers - 1,
+            )
+            vel_s = np.random.uniform(bounds["vel_s"][0], bounds["vel_s"][1], n_layers)
+            vel_p = np.random.uniform(bounds["vel_p"][0], bounds["vel_p"][1], n_layers)
+            density = np.random.uniform(
+                bounds["density"][0], bounds["density"][1], n_layers
+            )
+            velocity_model = np.array([list(depth) + [0], vel_p, vel_s, density])
 
-        # update mean params
-        mw = (model_params - self.param_bounds[:, 0]) / self.param_bounds[
-            :, 2
-        ]  # for covariance
-        self.params_sum += mw
-        mean_params = self.params_sum / (n_step + 1)
+            try:
+                pd = PhaseDispersion(*velocity_model)
+                pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+                valid_params = True
+            except (DispersionError, ZeroDivisionError) as e:
+                pass
 
-        # for each combination of params
-        # add to the sum
-        self.cov_mat_sum += np.outer(np.transpose(mw - mean_params), mw - mean_params)
+        data_true = pd_rayleigh.velocity
+        sigma_data = noise * data_true
+        # sigma_data is a percentage, so multiply by true data
+        data_obs = data_true + sigma_data * np.random.randn(len(periods))
+        model_true = np.concatenate((depth, vel_s))
 
-        # divide cov mat by number of samples
-        self.cov_mat = self.cov_mat_sum / (n_step + 1)
-
-        U, s, _ = np.linalg.svd(
-            self.cov_mat
-        )  # rotate it to its Singular Value Decomposition
-        # ut = np.transpose(u)
-        lambd = np.sqrt(s)  # pcsd
-
-        return U, lambd
+        return data_true, data_obs, sigma_data, model_true

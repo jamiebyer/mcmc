@@ -6,54 +6,100 @@ import json
 import os
 
 
-def plot_results(input_ds, results_ds, out_filename):
+def plot_results(
+    input_ds,
+    results_ds,
+    out_filename,
+    plot_prob_model=False,
+    plot_true_model=False,
+):
     # make a folder for all plotting output
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-    save_inversion_info(input_ds, results_ds)
+    """
+    save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
-    # plot_covariance_matrix(input_ds, results_ds)
-    model_params_timeseries(input_ds, results_ds, save=True, out_filename=out_filename)
+    model_params_timeseries(
+        input_ds,
+        results_ds,
+        save=True,
+        out_filename=out_filename,
+        plot_prob_model=plot_prob_model,
+        plot_true_model=plot_true_model,
+    )
     model_params_autocorrelation(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-    model_params_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    model_params_stepsize(input_ds, results_ds, save=True, out_filename=out_filename)
+    model_params_histogram(
+        input_ds,
+        results_ds,
+        save=True,
+        out_filename=out_filename,
+        plot_prob_model=plot_prob_model,
+        plot_true_model=plot_true_model,
+    )
     resulting_model_histogram(
-        input_ds, results_ds, save=True, out_filename=out_filename
+        input_ds,
+        results_ds,
+        save=True,
+        out_filename=out_filename,
+        plot_prob_model=plot_prob_model,
+        plot_true_model=plot_true_model,
     )
     plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
     plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
+    plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
+    plot_timestep_covariance_matrix(
+        input_ds, results_ds, save=True, out_filename=out_filename
+    )
+    """
+    plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
     """
+    everything should be saved already in input_ds and results_ds.
+    this file shows the simple info in a text file so it's easy to look at with the results.
+
     save input model
     write input info to file
-    """
-    # n_steps
-    # length of computation
-    # rotation
-    # starting at true model
-    # how much noise for synthetic data
-    # field data vs. synthetic
 
-    # save as json?
-    # print(results_ds)
+    - n_steps
+    - length of computation
+    - rotation
+    - starting at true model
+    - how much noise for synthetic data
+    - field data vs. synthetic
+    """
 
     output_dict = {
-        "param_bounds": input_ds["param_bounds"],
-        "model_true": input_ds["model_true"],
-        "n_layers": input_ds.attrs["n_layers"],
-        "vpvs_ratio": input_ds.attrs["vpvs_ratio"],
-        # "depth_posterior_width": input_ds.attrs["depth_posterior_width"],
-        # "vel_s_posterior_width": input_ds.attrs["vel_s_posterior_width"],
+        # "param_bounds": input_ds["param_bounds"],
+        "n_layers": int(input_ds.attrs["n_layers"]),
+        "vpvs_ratio": float(input_ds.attrs["vpvs_ratio"]),
+        "n_steps": int(np.max(results_ds["step"])),
+        "computation_time": float(results_ds.attrs["computation_time"]),
     }
 
-    # json_str = json.dumps(output_dict, indent=4)
+    if "model_true" in input_ds:
+        output_dict.update({"model_true": input_ds["model_true"].values.tolist()})
+
+    # loop over param types and add bounds, proposal width
+    depth_inds = input_ds["depth_inds"]
+    vel_s_inds = input_ds["vel_s_inds"]
+    output_dict.update(
+        {
+            "depth_bounds": input_ds["param_bounds"][depth_inds].values.tolist(),
+            "vel_s_bounds": input_ds["param_bounds"][vel_s_inds].values.tolist(),
+            # "depth_width": input_ds["proposal_width"][depth_inds].values,
+            # "vel_s_width": input_ds["proposal_width"][vel_s_inds].values,
+        }
+    )
+
+    json_str = json.dumps(output_dict, indent=4)
     with open("figures/" + out_filename + "/info-" + out_filename + ".json", "w") as f:
-        # f.write(json_str)
-        pass
+        f.write(json_str)
 
 
 def model_params_timeseries(
@@ -137,6 +183,86 @@ def model_params_timeseries(
         plt.show()
 
 
+def model_params_stepsize(
+    input_ds,
+    results_ds,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+):
+    """
+    plot model params vs. time step.
+
+    plot param bounds as black vertical lines.
+    plot true model as red vertical lines.
+
+    :param input_ds:
+    :param results_ds:
+    """
+    # use input_ds to interpret results_ds
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+    step = results_ds["step"][:-1]
+
+    params_diff = model_params[:, 1:] - model_params[:, :-1]
+
+    # true model
+    if plot_true_model:
+        true_model = input_ds["model_true"]
+    # get most probable model from ds_results
+    if plot_prob_model:
+        probable_model = results_ds["prob_params"]
+
+    param_types = ["depth", "vel_s"]
+    n_param_types = len(param_types)
+
+    # one column for depth, one for vel_s, one for likelihood and acceptance
+    n_layers = input_ds.attrs["n_layers"]
+
+    fig, ax = plt.subplots(
+        nrows=n_layers + 1, ncols=n_param_types, sharex=True, figsize=(14, 8)
+    )
+
+    # loop over all params and plot
+    # use param inds to get param name
+    legend = []
+    for c_ind, param in enumerate(param_types):
+        inds = input_ds[param + "_inds"]
+        for r_ind, p in enumerate(params_diff[inds]):
+            legend.append(param + " " + str(r_ind + 1))
+            # param timeseries
+            ax[r_ind, c_ind].scatter(
+                step,
+                p,
+                s=2,
+            )
+            # true model
+            if plot_true_model:
+                ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
+            # most probable model
+            if plot_prob_model:
+                ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+
+            # axis labels
+            ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
+            ax[r_ind, c_ind].set_xlabel("step")
+
+    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/" + out_filename + "/step-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
 def model_params_autocorrelation(
     input_ds,
     results_ds,
@@ -163,14 +289,6 @@ def model_params_autocorrelation(
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
-    step = results_ds["step"]
-
-    # true model
-    if plot_true_model:
-        true_model = input_ds["model_true"]
-    # get most probable model from ds_results
-    if plot_prob_model:
-        probable_model = results_ds["prob_params"]
 
     param_types = ["depth", "vel_s"]
     n_param_types = len(param_types)
@@ -187,34 +305,21 @@ def model_params_autocorrelation(
     legend = []
     for c_ind, param in enumerate(param_types):
         inds = input_ds[param + "_inds"]
-        bounds = input_ds["param_bounds"][inds]
         for r_ind, p in enumerate(model_params[inds]):
             legend.append(param + " " + str(r_ind + 1))
             # param timeseries
             autocorr = np.correlate(p, p, mode="full")
-            ax[r_ind, c_ind].plot(
-                # step,
-                autocorr,
-                # s=2,
-            )
-
-            # true model
-            # ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
-            # most probable model
-            # ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
-            # bounds
-            # ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
-            # ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
+            ax[r_ind, c_ind].plot(autocorr)
 
             # axis labels
             ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
-            ax[r_ind, c_ind].set_xlabel("step")
+            # ax[r_ind, c_ind].set_xlabel("step")
 
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    plt.suptitle("autocorrelation")
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/time-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/corr-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -226,12 +331,12 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     )
 
     # use results_ds to get model params
-    # model_params = results_ds["model_params"].values
     step = results_ds["step"]
 
     plt.clf()
     plt.subplot(3, 1, 1)
     plt.plot(step, results_ds["logL"])
+    plt.axhline(input_ds.attrs["logL_true"], c="red")
     plt.xlabel("step")
     plt.ylabel("logL")
 
@@ -249,7 +354,6 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     plt.xlabel("step")
     plt.ylabel("error ratio")
 
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
 
     if save:
@@ -301,7 +405,10 @@ def model_params_histogram(
     # one column for depth, one for vel_s
     n_layers = input_ds.attrs["n_layers"]
     fig, ax = plt.subplots(
-        nrows=n_layers + 1, ncols=n_param_types, sharex=True, figsize=(14, 8)
+        nrows=n_layers + 1,
+        ncols=n_param_types,
+        sharex="col",
+        figsize=(14, 8),
     )
 
     # loop over all params and plot
@@ -311,31 +418,40 @@ def model_params_histogram(
         if param == "depth":
             unit_scale = 1000  # unit conversion to m
         inds = input_ds[param + "_inds"]
-        bounds = input_ds["param_bounds"][inds]
+        bounds = unit_scale * input_ds["param_bounds"][inds]
+        full_bounds = [np.min(bounds[:, 0]), np.max(bounds[:, 1])]
 
         for r_ind, p in enumerate(model_params[inds]):
-            bins = unit_scale * np.linspace(
+            # full bounds
+            ax[r_ind, c_ind].set_xlim([full_bounds[0], full_bounds[1]])
+            # param bounds
+            ax[r_ind, c_ind].axvspan(
+                bounds[r_ind][0], bounds[r_ind][1], color="blue", alpha=0.1
+            )
+            ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
+            ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
+
+            bins = np.linspace(
                 bounds[r_ind][0],
                 bounds[r_ind][1],
                 n_bins,
             )
             # param timeseries
             ax[r_ind, c_ind].hist(unit_scale * p, bins=bins, density=True)
+
             # true model
             if plot_true_model:
                 ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
+
             # most probable model
             if plot_prob_model:
                 ax[r_ind, c_ind].axvline(
                     unit_scale * probable_model[inds][r_ind], c="purple"
                 )
-            # bounds
-            ax[r_ind, c_ind].set_xlim([bounds[r_ind][0], bounds[r_ind][1]])
 
             # axis labels
             ax[r_ind, c_ind].set_xlabel(param + " " + str(r_ind + 1))
 
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
 
     if save:
@@ -345,7 +461,13 @@ def model_params_histogram(
 
 
 def resulting_model_histogram(
-    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+    input_ds,
+    results_ds,
+    n_bins=100,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
 ):
     """
     plot the resulting model as velocity vs. depth
@@ -360,7 +482,8 @@ def resulting_model_histogram(
     model_params = results_ds["model_params"].values
 
     # true model
-    true_params = input_ds["model_true"].values
+    if plot_true_model:
+        true_params = input_ds["model_true"].values
 
     # define hist bins between bounds
     # use param inds to get depth, and use min and max of all depth bounds
@@ -416,25 +539,48 @@ def resulting_model_histogram(
             counts[depth_upper_inds:depth_lower_inds, vel_s_close_inds] += 1
 
     # plot true model overtop
-    true_depth = true_params[depth_inds] * 1000
-    true_vel_s = true_params[vel_s_inds]
-    true_depth_plotting = np.concatenate(
-        ([0], true_depth, [np.max(depth_bounds[:, 1]) * 1000])
-    )
+    if plot_true_model:
+        true_depth = true_params[depth_inds] * 1000
+        true_vel_s = true_params[vel_s_inds]
+        true_depth_plotting = np.concatenate(
+            ([0], true_depth, [np.max(depth_bounds[:, 1]) * 1000])
+        )
 
-    true_model = []
-    for layer_ind in range(input_ds.attrs["n_layers"] + 1):
-        true_model.append([true_depth_plotting[layer_ind], true_vel_s[layer_ind]])
-        true_model.append([true_depth_plotting[layer_ind + 1], true_vel_s[layer_ind]])
+        true_model = []
+        for layer_ind in range(input_ds.attrs["n_layers"] + 1):
+            true_model.append([true_depth_plotting[layer_ind], true_vel_s[layer_ind]])
+            true_model.append(
+                [true_depth_plotting[layer_ind + 1], true_vel_s[layer_ind]]
+            )
 
     fig = plt.figure()
     gs = GridSpec(1, 3, figure=fig)
 
     # Add subplots with custom spans
-    ax1 = fig.add_subplot(gs[0, 0:2])
-    ax2 = fig.add_subplot(gs[0, 2])
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1:], sharey=ax1)
 
-    h = ax1.imshow(
+    # plot depth histogram
+    for ind in range(input_ds.attrs["n_layers"]):
+        ax1.hist(
+            depth[ind],
+            bins=depth_bins,
+            density=True,
+            orientation="horizontal",
+        )
+
+    ax1.set_ylim(
+        [
+            np.min(depth_bounds[:, 0]) * 1000,
+            np.max(depth_bounds[:, 1]) * 1000,
+        ]
+    )
+    ax1.set_ylabel("depth (m)")
+
+    ax1.set_xlim(ax1.get_xlim()[::-1])
+    plt.gca().invert_yaxis()
+
+    h = ax2.imshow(
         counts,
         norm=LogNorm(),
         extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
@@ -443,31 +589,15 @@ def resulting_model_histogram(
     )
 
     # plot true model overtop
-    # true_model = np.array(true_model)
-    # ax1.plot(true_model[:, 1], true_model[:, 0], c="red")
+    if plot_true_model:
+        true_model = np.array(true_model)
+        ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
 
-    fig.colorbar(h, ax=ax1)
-    ax1.set_xlabel("vel s (km/s)")
-    ax1.set_ylabel("depth (m)")
+    fig.colorbar(h, ax=ax2)
+    ax2.set_xlabel("vel s (km/s)")
 
-    # plot depth histogram
-    for ind in range(input_ds.attrs["n_layers"]):
-        ax2.hist(
-            depth[ind],
-            bins=depth_bins,
-            density=True,
-            orientation="horizontal",
-        )
-
-    ax2.set_ylim(
-        [
-            np.min(depth_bounds[:, 0]) * 1000,
-            np.max(depth_bounds[:, 1]) * 1000,
-        ]
-    )
-    plt.gca().invert_yaxis()
-
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
+    # make these tick labels invisible
+    ax2.tick_params("y", labelleft=False)
 
     plt.tight_layout()
 
@@ -484,34 +614,51 @@ def plot_data_pred_histogram(
     plot all data predictions as a histogram.
     plot true data, observed data, and predicted data for the most probable model.
     """
+    plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
-    fig, ax = plt.subplots()
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
     freqs = 1 / input_ds["period"]
 
-    # plt.plot(freqs, input_ds["data_true"], zorder=3)
-    plt.scatter(freqs, input_ds["data_obs"], zorder=3)
+    if "data_true" in input_ds:
+        ax[0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
+    ax[0].scatter(freqs, input_ds["data_obs"], zorder=3, label="data_obs")
     # estimated error
     # *** depends if it's a percent error or not
     # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
     yerr = input_ds.attrs["sigma_data"]
-    plt.errorbar(freqs, results_ds["data_prob"], yerr, fmt="o", zorder=3, c="orange")
+    ax[0].errorbar(
+        freqs,
+        results_ds["data_prob"],
+        yerr,
+        fmt="o",
+        zorder=3,
+        c="orange",
+        label="data_pred",
+    )
 
     # flatten data_pred, repeat period
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
     data_preds = results_ds["data_pred"].values.flatten()
 
-    plt.hist2d(hist_freqs, data_preds, bins=n_bins, cmin=1, norm="log")
+    ax[0].hist2d(hist_freqs, data_preds, bins=n_bins, cmin=1, norm="log")
     # fig.colorbar(im, ax=ax, label="count")
 
-    ax.set_xscale("log")
-    ax.set_xlabel("frequency (Hz)")
-    ax.set_ylabel("velocity (km/s)")
+    ax[0].set_xscale("log")
+    ax[0].set_xlabel("frequency (Hz)")
+    ax[0].set_ylabel("velocity (km/s)")
 
-    plt.legend(["data_true", "data_obs", "data_pred"])
+    ax[0].legend()
+
+    ax[1].axhline(y=0, c="black")
+    ax[1].scatter(freqs, results_ds["data_prob"] - input_ds["data_obs"])
+
+    ax[1].set_xscale("log")
+    ax[1].set_xlabel("frequency (Hz)")
+    ax[1].set_title("residuals")
 
     if save:
         plt.savefig("figures/" + out_filename + "/data-" + out_filename + ".png")
@@ -520,12 +667,188 @@ def plot_data_pred_histogram(
 
 
 def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
-    plt.imshow(results_ds["cov_mat"][:, :, -1])
+    """
+    compare saved covariance matrix from sampling and covariance matrix from
+    the final, full sample
+    """
+    plt.clf()
+    # cut results by step
+    results_ds = results_ds.copy().isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    # normalize model params for computing cov mat
+    model_params_norm = np.empty(model_params.shape)
+    param_names = ["depth", "vel_s"]
+    bounds = input_ds["param_bounds"].values
+    for s in range(len(results_ds["step"])):
+        model_params_norm[:, s] = (model_params[:, s] - bounds[:, 0]) / bounds[:, 2]
+
+    mean_diff = model_params_norm - np.mean(model_params_norm, axis=0)
+    cov_mat_final = mean_diff @ mean_diff.T
+
+    computed_cov_mat = results_ds["cov_mat"][:, :, -1]
+
+    percent_diff = np.abs(cov_mat_final - computed_cov_mat) / (
+        np.abs(cov_mat_final - computed_cov_mat) / 2
+    )
+
+    n_model_params = input_ds.coords["n_model_params"]
+
+    corr_final = np.empty((len(n_model_params), len(n_model_params)))
+    corr_computed = np.empty((len(n_model_params), len(n_model_params)))
+
+    for i in n_model_params:
+        for j in n_model_params:
+            corr_final[i, j] = cov_mat_final[i, j] / np.sqrt(
+                cov_mat_final[i, i] * cov_mat_final[j, j]
+            )
+            corr_computed[i, j] = computed_cov_mat[i, j] / np.sqrt(
+                computed_cov_mat[i, i] * computed_cov_mat[j, j]
+            )
+
+    corr_percent_diff = np.abs(corr_final - corr_computed) / (
+        np.abs(corr_final - corr_computed) / 2
+    )
+
+    param_names = []
+    param_types = ["depth", "vel_s"]
+    for p in param_types:
+        inds = input_ds[p + "_inds"]
+        for i in range(np.sum(inds.values)):
+            param_names.append(p[0] + " " + str(i + 1))
+
+    fig, ax = plt.subplots(nrows=2, ncols=3, figsize=(18, 10))
+    im = ax[0, 0].imshow(computed_cov_mat)
+    ax[0, 0].set_title("cov mat from inversion run")
+    plt.colorbar(im)
+    ax[0, 0].set_xticks(n_model_params, param_names)
+    ax[0, 0].set_yticks(n_model_params, param_names)
+
+    im = ax[0, 1].imshow(cov_mat_final)
+    ax[0, 1].set_title("cov mat computed after run")
+    plt.colorbar(im)
+    ax[0, 1].set_xticks(n_model_params, param_names)
+    ax[0, 1].set_yticks(n_model_params, param_names)
+
+    # percent difference
+    im = ax[0, 2].imshow(percent_diff)
+    ax[0, 2].set_title("percent difference")
+    plt.colorbar(im)
+    ax[0, 2].set_xticks(n_model_params, param_names)
+    ax[0, 2].set_yticks(n_model_params, param_names)
+
+    # correlation matrix
+    im = ax[1, 0].imshow(corr_computed)
+    ax[1, 0].set_title("corr mat from inversion run")
+    plt.colorbar(im)
+    ax[1, 0].set_xticks(n_model_params, param_names)
+    ax[1, 0].set_yticks(n_model_params, param_names)
+
+    im = ax[1, 1].imshow(corr_final)
+    ax[1, 1].set_title("corr mat computed after run")
+    plt.colorbar(im)
+    ax[1, 1].set_xticks(n_model_params, param_names)
+    ax[1, 1].set_yticks(n_model_params, param_names)
+
+    # percent difference
+    im = ax[1, 2].imshow(corr_percent_diff)
+    ax[1, 2].set_title("percent difference")
+    plt.colorbar(im)
+    ax[1, 2].set_xticks(n_model_params, param_names)
+    ax[1, 2].set_yticks(n_model_params, param_names)
 
     if save:
         plt.savefig("figures/" + out_filename + "/cov-" + out_filename + ".png")
     else:
         plt.show()
+
+
+def plot_timestep_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
+    """
+    plot correlation / covariance matrix for different timesteps
+    """
+
+    plt.clf()
+    # cut results by step
+    results_ds = results_ds.copy().isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    timesteps = [3000, 8000, 15000]
+
+    cov_mat_1 = results_ds["cov_mat"][:, :, timesteps[0]]
+    cov_mat_2 = results_ds["cov_mat"][:, :, timesteps[1]]
+    cov_mat_3 = results_ds["cov_mat"][:, :, timesteps[2]]
+
+    step_size_1 = results_ds["proposal_width"][:, timesteps[0]]
+    step_size_2 = results_ds["proposal_width"][:, timesteps[1]]
+    step_size_3 = results_ds["proposal_width"][:, timesteps[2]]
+
+    n_model_params = input_ds.coords["n_model_params"]
+    corr_mat_1 = np.empty((len(n_model_params), len(n_model_params)))
+    corr_mat_2 = np.empty((len(n_model_params), len(n_model_params)))
+    corr_mat_3 = np.empty((len(n_model_params), len(n_model_params)))
+
+    for i in n_model_params:
+        for j in n_model_params:
+            corr_mat_1[i, j] = cov_mat_1[i, j] / np.sqrt(
+                cov_mat_1[i, i] * cov_mat_1[j, j]
+            )
+            corr_mat_2[i, j] = cov_mat_2[i, j] / np.sqrt(
+                cov_mat_2[i, i] * cov_mat_2[j, j]
+            )
+            corr_mat_3[i, j] = cov_mat_3[i, j] / np.sqrt(
+                cov_mat_3[i, i] * cov_mat_3[j, j]
+            )
+
+    param_names = []
+    param_types = ["depth", "vel_s"]
+    for p in param_types:
+        inds = input_ds[p + "_inds"]
+        for i in range(np.sum(inds.values)):
+            param_names.append(p[0] + " " + str(i + 1))
+
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(12, 12))
+    im = ax[0, 0].imshow(corr_mat_1)
+    ax[0, 0].set_title("corr mat " + str(timesteps[0]))
+    plt.colorbar(im)
+    ax[0, 0].set_xticks(n_model_params, param_names)
+    ax[0, 0].set_yticks(n_model_params, param_names)
+
+    im = ax[0, 1].imshow(corr_mat_2)
+    ax[0, 1].set_title("corr mat " + str(timesteps[1]))
+    plt.colorbar(im)
+    ax[0, 1].set_xticks(n_model_params, param_names)
+    ax[0, 1].set_yticks(n_model_params, param_names)
+
+    # percent difference
+    im = ax[1, 0].imshow(corr_mat_3)
+    ax[1, 0].set_title("corr mat " + str(timesteps[2]))
+    plt.colorbar(im)
+    ax[1, 0].set_xticks(n_model_params, param_names)
+    ax[1, 0].set_yticks(n_model_params, param_names)
+
+    # correlation matrix
+    ax[1, 1].plot(step_size_1)
+    ax[1, 1].plot(step_size_2)
+    ax[1, 1].plot(step_size_3)
+    ax[1, 1].set_title("step size")
+
+    if save:
+        plt.savefig("figures/" + out_filename + "/corr-time-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def compare_rotation():
+    """
+    compare timeseries for un-rotated and rotated run.
+    """
+    pass
 
 
 def compare_results():

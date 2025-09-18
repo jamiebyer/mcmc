@@ -1,6 +1,7 @@
 import numpy as np
 from disba import PhaseDispersion
 from disba._exception import DispersionError
+from inversion.model import Model
 
 np.complex_ = np.complex64
 
@@ -56,7 +57,11 @@ class SyntheticData(Data):
         )
         self.data_true = data_true
         self.model_true = model_params
+
         super().__init__(periods, data_obs, sigma_data)
+
+        # get true likelihood
+        self.logL_true = Model.get_likelihood(self, data_true, sigma_data)
 
     def generate_true_model(self, periods, noise, bounds, n_layers):
         """
@@ -109,4 +114,5 @@ class SyntheticData(Data):
                 "model_true": {"dims": ["n_model_params"], "data": self.model_true},
             }
         )
+        data_dict["attrs"].update({"logL_true": self.logL_true})
         return data_dict
