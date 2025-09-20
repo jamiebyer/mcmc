@@ -36,16 +36,24 @@ def setup_test_data(model_params, noise, depth, vel_s):
 def setup_test_model(n_layers):
     # set up example data
     proposal_width = {
-        "depth": [0.05],
-        "vel_s": [0.05],
+        "depth": 0.05,
+        "vel_s": 0.05,
     }  # fractional step size (multiplied by param bounds width)
 
     # set up data and inversion params
-    bounds = {
-        "depth": np.array([0.001, 0.3]),  # km
-        # "vel_s": [0.1, 1.8],  # km/s
-        "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
-    }
+    if n_layers == 1:
+        bounds = {
+            "depth": np.array([0.001, 0.3]),  # km
+            # "vel_s": [0.1, 1.8],  # km/s
+            "vel_s": np.array([[0.100, 0.750], [0.500, 2.000]]),  # km/s
+        }
+    elif n_layers == 2:
+        bounds = {
+            "depth": np.array([0.001, 0.3]),  # km
+            # "vel_s": [0.1, 1.8],  # km/s
+            "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
+        }
+
     model_params_kwargs = {
         "n_layers": n_layers,
         "vpvs_ratio": 1.75,
@@ -58,7 +66,7 @@ def setup_test_model(n_layers):
     return model_params
 
 
-def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filename):
+def basic_inversion(n_layers, noise, sample_prior, set_starting_model):
     """
     real noise added to synthetic data (percentage)
     assumed noise used in likelihood calculation (percentage)
@@ -78,12 +86,14 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
     data = setup_test_data(model_params, noise, depth, vel_s)
 
     inversion_init_kwargs = {
-        "n_burn": 50000,
+        "n_burn": 10000,
         "n_chunk": 500,
-        "n_mcmc": 1000000,
+        "n_mcmc": 50000,
+        "n_cov_chunk": 500,
+        "n_thin": 10,
         "n_chains": 1,
         "beta_spacing_factor": 1.15,
-        #"out_filename": out_filename,
+        "set_starting_model": set_starting_model,
     }
 
     model_kwargs = {"sigma_data": sigma_data * data.data_obs}
@@ -96,25 +106,14 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model, out_filen
         **inversion_init_kwargs,
     )
 
-    if set_starting_model:
-        # *** move to inversion ***
-        # set initial model to true model
-        model = inversion.chains[0]
-        test_model_params = np.concatenate((depth, vel_s))
-
-        # set initial likelihood
-        model.logL, model.data_pred, model.model_params.model_params = (
-            model.get_likelihood(test_model_params, data)
-        )
-
     return inversion, model_params
 
 
 def run_inversion():
     """
     - Run with sampling prior. Run with setting the starting model, run without.
-        - Run with 1 layer, 2 layers.
-        - Run with low noise, medium noise, high noise.
+    - Run with 1 layer, 2 layers.
+    - Run with low noise, medium noise, high noise.
     """
     sample_prior = False
     set_starting_model = False
@@ -122,25 +121,11 @@ def run_inversion():
     n_layers = 2
     noise = 0.05  # 0.02 # 0.05 # 0.1
 
-    out_filename = (
-        "/tests/test-run-"
-        + str(sample_prior)
-        + "-"
-        + str(set_starting_model)
-        + "-"
-        + str(rotate)
-        + "-"
-        + str(n_layers)
-        + "-"
-        + str(noise)
-    )
-
     inversion, model_params = basic_inversion(
         n_layers=n_layers,
         noise=noise,
         sample_prior=sample_prior,
         set_starting_model=set_starting_model,
-        out_filename=out_filename,
     )
     inversion.random_walk(
         model_params,
@@ -148,7 +133,9 @@ def run_inversion():
         rotate_params=rotate,
     )
 
+
 #####
+
 
 def plot_inversion(file_name):
 
@@ -158,10 +145,11 @@ def plot_inversion(file_name):
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
 
-    plot_results(input_ds, results_ds, out_filename=file_name)
+    # plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
 
-    # plot_covariance_matrix(input_ds, results_ds)
-    # model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
+    # save_inversion_info(input_ds, results_ds, out_filename=file_name)
+    plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=file_name)
+    # model_params_timeseries(input_ds, results_ds, save=False, out_filename=file_name)
     # model_params_autocorrelation(
     #     input_ds, results_ds, save=False, out_filename=file_name
     # )
@@ -180,12 +168,6 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    # file_name = "1757101041"
-    # file_name = "1757101120"
-    ### file_name = "1757101177"
-    ### file_name = "1757101220"
-    # file_name = "1757101401"
-    # file_name = "1757101461"
-    # file_name = "1757101501"
+    # file_name = "1758298177"
+    file_name = "1758238175"
     plot_inversion(file_name)
-

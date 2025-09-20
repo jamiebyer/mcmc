@@ -281,7 +281,46 @@ def test_layer_swap():
     # use sort layers / perturb params, but give the new params.
     # swaps and new swap isn't in bounds?
     # swap and is accepted, swap and not accepted...
-    pass
+
+    sample_prior = False
+    set_starting_model = True
+    rotate = False
+    n_layers = 2
+    noise = 0.02  # 0.02 # 0.05 # 0.1
+
+    inversion, model_params = basic_inversion(
+        n_layers=n_layers,
+        noise=noise,
+        sample_prior=sample_prior,
+        set_starting_model=set_starting_model,
+        # out_filename=out_filename,
+    )
+
+    # propose perturbation
+    # swap depths
+    model = inversion.chains[0]
+    test_model_params = model.model_params.model_params.copy()
+    p1 = test_model_params.copy()
+    """
+    depths = test_model_params[model.model_params.depth_inds]
+    depth_1 = depths[0]
+    depth_2 = depths[1]
+    depths[0:2] = [depth_2, depth_1]
+    test_model_params[model.model_params.depth_inds] = depths
+    """
+    test_model_params[0] = 0.04
+    test_model_params[1] = 0.02
+
+    p2 = test_model_params.copy()
+    # sort layers
+    test_model_params = model.model_params.sort_layers(test_model_params)
+    p3 = test_model_params.copy()
+
+    print(p1)
+    print(p2)
+    print(p3)
+
+    assert p1 == p3
 
 
 def test_acceptance_criteria():

@@ -70,15 +70,15 @@ class DispersionCurveParams(ModelParams):
                 "param_bounds": {
                     "dims": ["n_model_params", "n_bounds"],
                     "data": self.assemble_param_bounds(),
-                }
+                },
+                "proposal_width": {
+                    "dims": ["n_model_params"],
+                    "data": self.assemble_proposal_width(),
+                },
             },
             "attrs": {
                 "n_layers": self.n_layers,
                 "vpvs_ratio": self.vpvs_ratio,
-                # "depth_bounds": self.param_bounds["depth"],
-                # "vel_s_bounds": self.param_bounds["vel_s"],
-                "depth_proposal_width": self.proposal_width["depth"],
-                "vel_s_proposal_width": self.proposal_width["vel_s"],
             },
         }
 
@@ -107,9 +107,9 @@ class DispersionCurveParams(ModelParams):
         vel_s_bounds = self.param_bounds["vel_s"]
 
         if len(depth_bounds.shape) == 1:
-            depth_bounds = depth_bounds * self.n_layers
+            depth_bounds = [depth_bounds] * self.n_layers
         if len(vel_s_bounds.shape) == 1:
-            vel_s_bounds = vel_s_bounds * (self.n_layers + 1)
+            vel_s_bounds = [vel_s_bounds] * (self.n_layers + 1)
 
         param_bounds = np.concatenate(
             (
@@ -133,15 +133,15 @@ class DispersionCurveParams(ModelParams):
         depth_width = self.proposal_width["depth"]
         vel_s_width = self.proposal_width["vel_s"]
 
-        if len(depth_width) == 1:
-            depth_width = depth_width * self.n_layers
-        if len(vel_s_width) == 1:
-            vel_s_width = vel_s_width * (self.n_layers + 1)
+        if isinstance(depth_width, float):
+            depth_width = [depth_width] * self.n_layers
+        if isinstance(vel_s_width, float):
+            vel_s_width = [vel_s_width] * (self.n_layers + 1)
 
         proposal_width = np.concatenate(
             (
-                depth_bounds,
-                vel_s_bounds,
+                depth_width,
+                vel_s_width,
             ),
             axis=0,
         )
@@ -168,7 +168,7 @@ class DispersionCurveParams(ModelParams):
         # depth = np.concatenate(([0], depth))
         inds = np.argsort(depth)
         depth = depth[inds]
-        vel_s[1:] = vel_s[1:][inds]
+        vel_s[:-1] = vel_s[:-1][inds]
 
         model_params[self.depth_inds] = depth
         model_params[self.vel_s_inds] = vel_s
