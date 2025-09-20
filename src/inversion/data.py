@@ -34,19 +34,7 @@ class Data:
 
 class FieldData(Data):
     def __init__(self, periods, phase_vels, stds):
-        # periods, phase_vels, stds = self.read_observed_data(path)
-
         super().__init__(periods, phase_vels, stds)
-
-    def read_observed_data(self, path):
-        """
-        read dispersion curve
-        """
-        freqs, phase_vels, stds = None, None, None  # get_dispersion_curve(path)
-        periods = 1 / freqs
-        # sort
-
-        return periods, phase_vels, stds
 
 
 class SyntheticData(Data):

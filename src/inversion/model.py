@@ -1,7 +1,5 @@
 import numpy as np
 from disba._exception import DispersionError
-from numba.core.errors import TypingError
-import pandas as pd
 
 np.complex_ = np.complex64
 
@@ -95,6 +93,7 @@ class Model:
         n_step,
         n_burn,
         n_chunk,
+        n_thin,
         T=1,
         rotate_params=True,
         sample_prior=False,
@@ -117,25 +116,30 @@ class Model:
         # if rotate and (np.mod(n_step + 1, n_chunk) == 0):
         if rotate_params:
             burn_in = n_step < n_burn
+
             # update rotation matrix
             if burn_in and linear_rotation:
                 self.rotation_matrix, self.proposal_width = self.linear_rotation(
                     model_params_norm, data
                 )
-            elif (n_step < (n_burn + self.n_cov_chunk)) & (
-                n_step % self.n_cov_chunk == 0
-            ):
+            else:
+                self.update_covariance_matrix(model_params_norm)
                 # get rotation matrix and step size from correlation matrix
-                # lambd, U = np.linalg.eig(self.cov_mat)
-                self.rotation_matrix, self.proposal_width = (
-                    self.update_covariance_matrix(model_params_norm)
+                update_rot_mat = (
+                    n_step >= (n_burn + self.n_cov_chunk + 2)
+                    and (n_step % self.n_cov_chunk == 0)
+                    and (n_thin == 0)
                 )
+                if update_rot_mat:
+                    self.rotation_matrix, self.proposal_width = (
+                        self.update_rotation_matrix()
+                    )
 
         # *** pick a random parameter to perturb
         ind = np.random.randint(self.model_params.n_model_params)
         # copy current model params to perturb
         #
-        if rotate_params:
+        if rotate_params and not burn_in:
             test_model_params = self.rotation_matrix.T @ model_params_norm
         else:
             test_model_params = model_params_norm.copy()
@@ -150,7 +154,7 @@ class Model:
                 np.pi * (np.random.uniform() - 0.5)
             )
 
-        if rotate_params:
+        if rotate_params and not burn_in:
             # rotate back
             test_model_params = self.rotation_matrix @ test_model_params
 
@@ -219,10 +223,10 @@ class Model:
 
         # take difference between current params and previous params
         params_diff = model_params_norm - self.params_prev
-
         if np.all(params_diff == 0):
+            # ***
+            # raise ValueError
             return self.rotation_matrix, self.proposal_width
-
         # for each combination of params
         # add to the sum
         self.cov_mat_sum += np.outer(np.transpose(params_diff), params_diff)
@@ -231,6 +235,9 @@ class Model:
         self.cov_mat = self.cov_mat_sum / (self.n_cov + 1)
         self.n_cov += 1
 
+    def update_rotation_matrix(self):
+        """ """
+        # update the rotation matrix
         U, s, _ = np.linalg.svd(
             self.cov_mat
         )  # rotate it to its Singular Value Decomposition

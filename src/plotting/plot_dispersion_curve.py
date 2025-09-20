@@ -17,7 +17,6 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -54,8 +53,6 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-    """
-    plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -176,6 +173,7 @@ def model_params_timeseries(
 
     # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
+    plt.suptitle("model params timeseries")
 
     if save:
         plt.savefig("figures/" + out_filename + "/time-" + out_filename + ".png")
@@ -256,6 +254,7 @@ def model_params_stepsize(
 
     # plt.subplots_adjust(wspace=0.1, hspace=0.1)
     plt.tight_layout()
+    plt.suptitle("model params step size")
 
     if save:
         plt.savefig("figures/" + out_filename + "/step-" + out_filename + ".png")
@@ -684,10 +683,11 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     model_params_norm = np.empty(model_params.shape)
     param_names = ["depth", "vel_s"]
     bounds = input_ds["param_bounds"].values
-    for s in range(len(results_ds["step"])):
+    # for s in range(len(results_ds["step"])):
+    for s in range(model_params.shape[1]):
         model_params_norm[:, s] = (model_params[:, s] - bounds[:, 0]) / bounds[:, 2]
 
-    mean_diff = model_params_norm - np.mean(model_params_norm, axis=0)
+    mean_diff = (model_params_norm.T - np.mean(model_params_norm, axis=1)).T
     cov_mat_final = mean_diff @ mean_diff.T
 
     computed_cov_mat = results_ds["cov_mat"][:, :, -1]

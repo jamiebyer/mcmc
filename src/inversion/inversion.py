@@ -10,7 +10,6 @@ import xarray as xr
 import time
 from copy import deepcopy
 import dask.dataframe as dd
-import time
 
 # from netCDF4 import Dataset
 import h5py
@@ -25,6 +24,8 @@ class Inversion:
         n_burn,
         n_chunk,
         n_mcmc,
+        n_cov_chunk=200,
+        n_thin=1,
         n_chains=1,
         beta_spacing_factor=None,
         out_filename=None,
@@ -56,18 +57,22 @@ class Inversion:
         self.n_burn = n_burn
         self.n_chunk = n_chunk
         self.n_mcmc = n_mcmc  # number of steps for the random walk
+        self.n_thin = n_thin
 
         # initialize chains, generate starting params.
         self.model_params = model_params
         self.n_chains = n_chains
         self.initialize_chains(
-            model_params, sigma_data, beta_spacing_factor, set_starting_model
+            model_params,
+            sigma_data,
+            n_cov_chunk,
+            beta_spacing_factor,
+            set_starting_model,
         )
 
         # set initial likelihood ***
 
         # *** need a check for if the file exists ***
-        # define out_dir
         self.out_dir = "./results/inversion/"
         if not out_filename:
             self.out_filename = str(int(time.time()))
@@ -108,8 +113,9 @@ class Inversion:
         out_path = out_path.replace(filename, "input-" + filename)
 
         # saved dataset should just have parameter names, dimensions, and constants
-        if not os.path.isfile(out_path):
-            input_ds.to_netcdf(out_path)
+        if os.path.isfile(out_path):
+            raise PermissionError("File already exists.")
+        input_ds.to_netcdf(out_path)
 
     def define_results_dataset(self, model_params):
         # write empty dataset to file, with coord for n_data
@@ -123,8 +129,9 @@ class Inversion:
         out_path = self.out_dir + self.out_filename + ".nc"
         out_path = out_path.replace(filename, "results-" + filename)
 
-        if not os.path.isfile(out_path):
-            ds.to_netcdf(out_path)
+        if os.path.isfile(out_path):
+            raise PermissionError("File already exists.")
+        ds.to_netcdf(out_path)
 
         self.ds_storage = {
             "coords": {
@@ -155,6 +162,11 @@ class Inversion:
                         )
                     ),
                 },
+                "proposal_width": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                # acceptance rates / errors
                 "acc_rate": {
                     "dims": ["step"],
                     # "dims": ["n_model_params", "step"],
@@ -259,6 +271,7 @@ class Inversion:
         self,
         model_params,
         sigma_data,
+        n_cov_chunk,
         beta_spacing_factor,
         set_starting_model=False,
     ):
@@ -277,6 +290,7 @@ class Inversion:
             model = Model(
                 deepcopy(model_params),
                 sigma_data,
+                n_cov_chunk,
                 betas[ind],
             )
 
@@ -285,7 +299,7 @@ class Inversion:
                 data_pred = self.model_params.forward_model(
                     self.data.periods, test_params
                 )
-                logL_new = model.get_likelihood(self.data, data_pred)
+                logL_new = Model.get_likelihood(self.data, data_pred, model.sigma_data)
                 valid_params = True
             else:
                 # initialize model params
@@ -297,7 +311,9 @@ class Inversion:
                         data_pred = self.model_params.forward_model(
                             self.data.periods, test_params
                         )
-                        logL_new = model.get_likelihood(self.data, data_pred)
+                        logL_new = Model.get_likelihood(
+                            self.data, data_pred, model.sigma_data
+                        )
                         valid_params = True
                     except (DispersionError, ZeroDivisionError, TypeError):
                         pass
@@ -332,22 +348,23 @@ class Inversion:
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
-            burn_in = n_steps < self.n_burn
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
-                chain_model = self.chains[ind]
-                # could do normalization and PC rotation out here... ***
-                chain_model.perturb_params(
-                    self.data,
-                    proposal_distribution,
-                    n_steps,
-                    burn_in,
-                    self.n_chunk,
-                    sample_prior=sample_prior,
-                    rotate_params=rotate_params,
-                )
+                for t in range(self.n_thin):
+                    chain_model = self.chains[ind]
+                    # could do normalization and PC rotation out here... ***
+                    chain_model.perturb_params(
+                        self.data,
+                        proposal_distribution,
+                        n_steps,
+                        self.n_burn,
+                        self.n_chunk,
+                        t,
+                        sample_prior=sample_prior,
+                        rotate_params=rotate_params,
+                    )
 
-                delayed_results.append(chain_model)
+                    delayed_results.append(chain_model)
 
             # synchronizing the separate chains
             self.chains = delayed_results
@@ -384,10 +401,12 @@ class Inversion:
                 self.ds_storage["data_vars"]["cov_mat"]["data"][
                     :, :, n_save
                 ] = chain.cov_mat
+                self.ds_storage["data_vars"]["proposal_width"]["data"][
+                    :, n_save
+                ] = chain.proposal_width
                 self.ds_storage["data_vars"]["data_pred"]["data"][
                     :, n_save
                 ] = chain.data_pred.copy()
-                # self.ds_storage["beta"][{"step": n_step}] = chain.beta
 
                 # acceptance rate
                 # self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
