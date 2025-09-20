@@ -11,18 +11,24 @@ def plot_results(input_ds, results_ds, out_filename):
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+    print(1)
     save_inversion_info(input_ds, results_ds)
-
+    print(2)
     # plot_covariance_matrix(input_ds, results_ds)
     model_params_timeseries(input_ds, results_ds, save=True, out_filename=out_filename)
+    print(3)
     model_params_autocorrelation(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
+    print(4)
     model_params_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    print(5)
     resulting_model_histogram(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-    plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    print(6)
+    # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    print(7)
     plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
@@ -49,6 +55,8 @@ def save_inversion_info(input_ds, results_ds, out_filename=""):
         # "depth_posterior_width": input_ds.attrs["depth_posterior_width"],
         # "vel_s_posterior_width": input_ds.attrs["vel_s_posterior_width"],
     }
+
+    
 
     # json_str = json.dumps(output_dict, indent=4)
     with open("figures/" + out_filename + "/info-" + out_filename + ".json", "w") as f:
@@ -214,7 +222,7 @@ def model_params_autocorrelation(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/time-" + out_filename + ".png")
+        plt.savefig("figures/"+out_filename+"/corr-" + out_filename + ".png")
     else:
         plt.show()
 

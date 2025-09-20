@@ -180,20 +180,12 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-<<<<<<< HEAD
-    file_name = "1757101041"
+    # file_name = "1757101041"
     # file_name = "1757101120"
-    # file_name = "1757101177"
-    # file_name = "1757101220"
+    ### file_name = "1757101177"
+    ### file_name = "1757101220"
     # file_name = "1757101401"
     # file_name = "1757101461"
     # file_name = "1757101501"
-=======
-<<<<<<< HEAD
-    file_name = "1757354761"
-=======
-    file_name = "1757089084"
->>>>>>> 72725ff4e3eda65b0d5a69d145669b20841b0f98
->>>>>>> feffb2ae12657fd40f5046b5056d87c2af4a9e08
     plot_inversion(file_name)
 
