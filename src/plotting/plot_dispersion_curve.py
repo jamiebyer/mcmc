@@ -17,6 +17,10 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+
+    plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
+
+    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -53,7 +57,7 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-
+    """
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
     """
@@ -76,7 +80,7 @@ def save_inversion_info(input_ds, results_ds, out_filename=""):
         "n_layers": int(input_ds.attrs["n_layers"]),
         "vpvs_ratio": float(input_ds.attrs["vpvs_ratio"]),
         "n_steps": int(np.max(results_ds["step"])),
-        "computation_time": float(results_ds.attrs["computation_time"]),
+        # "computation_time": float(results_ds.attrs["computation_time"]),
     }
 
     if "model_true" in input_ds:
@@ -89,8 +93,8 @@ def save_inversion_info(input_ds, results_ds, out_filename=""):
         {
             "depth_bounds": input_ds["param_bounds"][depth_inds].values.tolist(),
             "vel_s_bounds": input_ds["param_bounds"][vel_s_inds].values.tolist(),
-            # "depth_width": input_ds["proposal_width"][depth_inds].values,
-            # "vel_s_width": input_ds["proposal_width"][vel_s_inds].values,
+            "depth_width": input_ds["proposal_width"][depth_inds].values.tolist(),
+            "vel_s_width": input_ds["proposal_width"][vel_s_inds].values.tolist(),
         }
     )
 
@@ -335,21 +339,31 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
     plt.clf()
     plt.subplot(3, 1, 1)
     plt.plot(step, results_ds["logL"])
-    plt.axhline(input_ds.attrs["logL_true"], c="red")
+    if "logL_true" in input_ds.attrs:
+        plt.axhline(input_ds.attrs["logL_true"], c="red")
     plt.xlabel("step")
     plt.ylabel("logL")
 
+
+    param_types = ["depth", "vel_s"]
+    legend = []
+    for c_ind, param in enumerate(param_types):
+        inds = input_ds[param + "_inds"]
+        for r_ind in range(np.sum(inds.values)):
+            legend.append(param + " " + str(r_ind + 1))
+
     plt.subplot(3, 1, 2)
     plt.plot(step, results_ds["acc_rate"].T)
-    # plt.legend(legend)
+
+    plt.legend(legend)
     plt.xlabel("step")
     plt.ylabel("acceptance rate")
 
     plt.subplot(3, 1, 3)
     plt.plot(step, results_ds["bounds_err"].T)
-    plt.plot(step, results_ds["physics_err"].T)
-    plt.plot(step, results_ds["fm_err"].T)
-    plt.legend(["bounds error", "half-space error", "forward model error"])
+    # plt.plot(step, results_ds["physics_err"].T)
+    # plt.plot(step, results_ds["fm_err"].T)
+    # plt.legend(["bounds error", "half-space error", "forward model error"])
     plt.xlabel("step")
     plt.ylabel("error ratio")
 
@@ -624,20 +638,23 @@ def plot_data_pred_histogram(
 
     if "data_true" in input_ds:
         ax[0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
-    ax[0].scatter(freqs, input_ds["data_obs"], zorder=3, label="data_obs")
-    # estimated error
-    # *** depends if it's a percent error or not
-    # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
     yerr = input_ds.attrs["sigma_data"]
     ax[0].errorbar(
         freqs,
-        results_ds["data_prob"],
+        input_ds["data_obs"],
         yerr,
         fmt="o",
         zorder=3,
         c="orange",
-        label="data_pred",
+        label="data_obs",
     )
+
+    # get data prediction
+    pred_ind = np.argmax(results_ds["logL"].values)
+    ax[0].scatter(freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred")
+    # estimated error
+    # *** depends if it's a percent error or not
+    # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
 
     # flatten data_pred, repeat period
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
@@ -653,7 +670,7 @@ def plot_data_pred_histogram(
     ax[0].legend()
 
     ax[1].axhline(y=0, c="black")
-    ax[1].scatter(freqs, results_ds["data_prob"] - input_ds["data_obs"])
+    ax[1].scatter(freqs, results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"])
 
     ax[1].set_xscale("log")
     ax[1].set_xlabel("frequency (Hz)")

@@ -27,6 +27,7 @@ class Inversion:
         n_cov_chunk=200,
         n_thin=1,
         n_chains=1,
+        individual_acceptance=False,
         beta_spacing_factor=None,
         out_filename=None,
         set_starting_model=False,
@@ -59,6 +60,8 @@ class Inversion:
         self.n_mcmc = n_mcmc  # number of steps for the random walk
         self.n_thin = n_thin
 
+        self.individual_acceptance = individual_acceptance
+
         # initialize chains, generate starting params.
         self.model_params = model_params
         self.n_chains = n_chains
@@ -66,6 +69,7 @@ class Inversion:
             model_params,
             sigma_data,
             n_cov_chunk,
+            individual_acceptance,
             beta_spacing_factor,
             set_starting_model,
         )
@@ -166,37 +170,53 @@ class Inversion:
                     "dims": ["n_model_params", "step"],
                     "data": np.empty((model_params.n_model_params, self.n_chunk)),
                 },
-                # acceptance rates / errors
-                "acc_rate": {
-                    "dims": ["step"],
-                    # "dims": ["n_model_params", "step"],
-                    "data": np.empty(self.n_chunk),
-                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "bounds_err": {
-                    "dims": ["step"],
-                    # "dims": ["n_model_params", "step"],
-                    "data": np.empty(self.n_chunk),
-                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "physics_err": {
-                    "dims": ["step"],
-                    # "dims": ["n_model_params", "step"],
-                    "data": np.empty(self.n_chunk),
-                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "fm_err": {
-                    "dims": ["step"],
-                    # "dims": ["n_model_params", "step"],
-                    "data": np.empty(self.n_chunk),
-                    # "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
                 "data_pred": {
                     "dims": ["period", "step"],
                     "data": np.empty((self.data.n_data, self.n_chunk)),
                 },
             },
         }
+        # acceptance rates / errors
+        if self.individual_acceptance:
+            self.ds_storage["data_vars"].update({
+                "acc_rate": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "bounds_err": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "physics_err": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                "fm_err": {
+                    "dims": ["n_model_params", "step"],
+                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                },
+                }
+            )
+        else:
+            self.ds_storage["data_vars"].update({
+                "acc_rate": {
+                    "dims": ["step"],
+                    "data": np.empty(self.n_chunk),
+                },
+                "bounds_err": {
+                    "dims": ["step"],
+                    "data": np.empty(self.n_chunk),
+                },
+                "physics_err": {
+                    "dims": ["step"],
+                    "data": np.empty(self.n_chunk),
+                },
+                "fm_err": {
+                    "dims": ["step"],
+                    "data": np.empty(self.n_chunk),
+                },
+                }
+            )
 
     def get_optimization_model(
         self,
@@ -272,6 +292,7 @@ class Inversion:
         model_params,
         sigma_data,
         n_cov_chunk,
+        individual_acceptance,
         beta_spacing_factor,
         set_starting_model=False,
     ):
@@ -291,6 +312,7 @@ class Inversion:
                 deepcopy(model_params),
                 sigma_data,
                 n_cov_chunk,
+                individual_acceptance,
                 betas[ind],
             )
 
@@ -379,7 +401,7 @@ class Inversion:
 
         # add most probable model to file
         # (and total computation time)
-        self.write_probable_model(out_path, start_time)
+        # self.write_probable_model(out_path, start_time)
 
     def store_samples(self, n_step):
         """
@@ -409,31 +431,34 @@ class Inversion:
                 ] = chain.data_pred.copy()
 
                 # acceptance rate
-                # self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
-                #     chain.acceptance_rate["acc_rate"]
-                # )
-                self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
-                    chain.acceptance_rate["acc_rate"]
-                )
-                # error ratio
-                # self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
-                #    chain.acceptance_rate["bounds_err_ratio"]
-                # )
-                self.ds_storage["data_vars"]["bounds_err"]["data"][n_save] = (
-                    chain.acceptance_rate["bounds_err_ratio"]
-                )
-                # self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
-                #     chain.acceptance_rate["physics_err_ratio"]
-                # )
-                self.ds_storage["data_vars"]["physics_err"]["data"][n_save] = (
-                    chain.acceptance_rate["physics_err_ratio"]
-                )
-                # self.ds_storage["data_vars"]["fm_err"]["data"][:, n_save] = (
-                #     chain.acceptance_rate["fm_err_ratio"]
-                # )
-                self.ds_storage["data_vars"]["fm_err"]["data"][n_save] = (
-                    chain.acceptance_rate["fm_err_ratio"]
-                )
+                if self.individual_acceptance:
+                    self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
+                        chain.acceptance_rate["acc_rate"]
+                    )
+                    # error ratio
+                    self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
+                       chain.acceptance_rate["bounds_err_ratio"]
+                    )
+                    self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
+                        chain.acceptance_rate["physics_err_ratio"]
+                    )
+                    self.ds_storage["data_vars"]["fm_err"]["data"][:, n_save] = (
+                        chain.acceptance_rate["fm_err_ratio"]
+                    )
+                else:
+                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
+                        chain.acceptance_rate["acc_rate"]
+                    )
+                    # error ratio
+                    self.ds_storage["data_vars"]["bounds_err"]["data"][n_save] = (
+                        chain.acceptance_rate["bounds_err_ratio"]
+                    )
+                    self.ds_storage["data_vars"]["physics_err"]["data"][n_save] = (
+                        chain.acceptance_rate["physics_err_ratio"]
+                    )
+                    self.ds_storage["data_vars"]["fm_err"]["data"][n_save] = (
+                        chain.acceptance_rate["fm_err_ratio"]
+                    )
 
     def write_samples(self, n_steps, out_path):
         """
