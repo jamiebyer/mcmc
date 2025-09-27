@@ -11,6 +11,7 @@ class Model:
         model_params,
         sigma_data,
         n_cov_chunk,
+        individual_acceptance,
         beta=None,
     ):
         """
@@ -20,6 +21,8 @@ class Model:
         """
         self.logL = None
         self.data_pred = None
+
+        self.individual_acceptance = individual_acceptance
 
         self.model_params = model_params
         self.sigma_data = sigma_data
@@ -38,19 +41,32 @@ class Model:
         n_params = self.model_params.n_model_params
 
         # acceptance ratio for each parameter
-        # model params will have specific forward model error conditions...
-        self.acceptance_rate = {
-            # "n_prop": np.zeros(n_params),  # proposed
-            "n_acc": 0,  # np.zeros(n_params),  # accepted
-            "n_rej": 0,  # np.zeros(n_params),  # rejected
-            "n_bounds_err": 0,  # np.zeros(n_params),  # out of bounds error
-            "n_physics_err": 0,  # np.zeros(n_params),  # half-space error
-            "n_fm_err": 0,  # np.zeros(n_params),  # forward model error
-            "acc_rate": 0,  # np.zeros(n_params),
-            "bounds_err_ratio": 0,  # np.zeros(n_params),
-            "physics_err_ratio": 0,  # np.zeros(n_params),
-            "fm_err_ratio": 0,  # np.zeros(n_params),
-        }
+        if self.individual_acceptance:
+            self.acceptance_rate = {
+                # "n_prop": np.zeros(n_params),  # proposed
+                "n_acc": np.zeros(n_params),  # accepted
+                "n_rej": np.zeros(n_params),  # rejected
+                "n_bounds_err": np.zeros(n_params),  # out of bounds error
+                "n_physics_err": np.zeros(n_params),  # half-space error
+                "n_fm_err": np.zeros(n_params),  # forward model error
+                "acc_rate": np.zeros(n_params),
+                "bounds_err_ratio": np.zeros(n_params),
+                "physics_err_ratio": np.zeros(n_params),
+                "fm_err_ratio": np.zeros(n_params),
+            }
+        else:
+            self.acceptance_rate = {
+                # "n_prop": np.zeros(n_params),  # proposed
+                "n_acc": 0, # accepted
+                "n_rej": 0,  # rejected
+                "n_bounds_err": 0,  # out of bounds error
+                "n_physics_err": 0,  # half-space error
+                "n_fm_err": 0,  # forward model error
+                "acc_rate": 0,
+                "bounds_err_ratio": 0,
+                "physics_err_ratio": 0,
+                "fm_err_ratio": 0,
+            }
 
         self.beta = beta  # beta for parallel tempering
 
@@ -176,12 +192,18 @@ class Model:
             if not self.validate_bounds(
                 test_model_params
             ):  # check parameters are in bounds
-                self.acceptance_rate["n_bounds_err"] += 1
+                if self.individual_acceptance:
+                    self.acceptance_rate["n_bounds_err"][ind] += 1
+                else:
+                    self.acceptance_rate["n_bounds_err"] += 1
                 valid_params = False
             elif not self.model_params.validate_physics(
                 test_model_params
             ):  # validate physics
-                self.acceptance_rate["n_physics_err"] += 1
+                if self.individual_acceptance:
+                    self.acceptance_rate["n_physics_err"][ind] += 1
+                else:
+                    self.acceptance_rate["n_physics_err"] += 1
                 valid_params = False
             else:
                 # run forward model to predict data for test_params
@@ -190,7 +212,10 @@ class Model:
                         data.periods, test_model_params
                     )
                 except (DispersionError, ZeroDivisionError, TypeError):
-                    self.acceptance_rate["n_fm_err"] += 1
+                    if self.individual_acceptance:
+                        self.acceptance_rate["n_fm_err"][ind] += 1
+                    else:
+                        self.acceptance_rate["n_fm_err"] += 1
                     valid_params = False
 
         if valid_params:
@@ -207,7 +232,10 @@ class Model:
                 self.logL = logL_new
                 self.data_pred = data_pred_new
 
-        self.update_acceptance_rate(acc)
+        if self.individual_acceptance:
+            self.update_acceptance_rate(acc, ind)
+        else:
+            self.update_acceptance_rate(acc)
         # self.stepsize_tuning(n_step)
 
     #
@@ -409,7 +437,7 @@ class Model:
         xi = np.random.uniform()  # between 0 and 1
         return xi <= np.exp(dlogL)
 
-    def update_acceptance_rate(self, acc):
+    def update_acceptance_rate(self, acc, ind=None):
         """
         update acceptance rate.
         make sure no division by zero.
@@ -417,24 +445,52 @@ class Model:
         :param acc: boolean for whether perturbed parameter is accepted.
         :paran ind: index of parameter to update.
         """
-        if acc:
-            self.acceptance_rate["n_acc"] += 1
-        else:
-            self.acceptance_rate["n_rej"] += 1
+        if ind is not None:
+            if acc:
+                self.acceptance_rate["n_acc"][ind] += 1
+            else:
+                self.acceptance_rate["n_rej"][ind] += 1
 
-        if self.acceptance_rate["n_rej"] > 0:
-            self.acceptance_rate["acc_rate"] = self.acceptance_rate["n_acc"] / (
-                self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
-            )
-            self.acceptance_rate["bounds_err_ratio"] = self.acceptance_rate[
-                "n_bounds_err"
-            ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
-            self.acceptance_rate["physics_err_ratio"] = self.acceptance_rate[
-                "n_physics_err"
-            ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
-            self.acceptance_rate["fm_err_ratio"] = self.acceptance_rate["n_fm_err"] / (
-                self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
-            )
+            if self.acceptance_rate["n_rej"][ind] > 0:
+                self.acceptance_rate["acc_rate"][ind] = self.acceptance_rate["n_acc"][ind] / (
+                    self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
+                )
+                self.acceptance_rate["bounds_err_ratio"][ind] = self.acceptance_rate[
+                    "n_bounds_err"
+                ][ind] / (self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind])
+                self.acceptance_rate["physics_err_ratio"][ind] = self.acceptance_rate[
+                    "n_physics_err"
+                ][ind] / (self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind])
+                self.acceptance_rate["fm_err_ratio"][ind] = self.acceptance_rate["n_fm_err"][ind] / (
+                    self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
+                )
+        else:
+            if acc:
+                if ind is not None:
+                    self.acceptance_rate["n_acc"][ind] += 1
+                else:
+                    self.acceptance_rate["n_acc"] += 1
+            else:
+                if ind is not None:
+                    self.acceptance_rate["n_rej"][ind] += 1
+                else:
+                    self.acceptance_rate["n_rej"] += 1
+
+            if self.acceptance_rate["n_rej"] > 0:
+                self.acceptance_rate["acc_rate"] = self.acceptance_rate["n_acc"] / (
+                    self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
+                )
+                self.acceptance_rate["bounds_err_ratio"] = self.acceptance_rate[
+                    "n_bounds_err"
+                ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
+                self.acceptance_rate["physics_err_ratio"] = self.acceptance_rate[
+                    "n_physics_err"
+                ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
+                self.acceptance_rate["fm_err_ratio"] = self.acceptance_rate["n_fm_err"] / (
+                    self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
+                )
+
+        
 
     #
     # STEPSIZE TUNING

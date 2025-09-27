@@ -145,7 +145,7 @@ class DispersionCurveParams(ModelParams):
             ),
             axis=0,
         )
-
+        
         return proposal_width
 
     def validate_physics(self, model_params):
