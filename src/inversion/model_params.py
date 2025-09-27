@@ -187,6 +187,7 @@ class DispersionCurveParams(ModelParams):
         depth = model_params[self.depth_inds]
         vel_s = model_params[self.vel_s_inds]
         # get thicknesses
+        # *** probably a faster way to do this
         depth = np.concatenate(([0], depth))
         thickness = np.concatenate((depth[1:] - depth[:-1], [0]))
 
@@ -203,13 +204,8 @@ class DispersionCurveParams(ModelParams):
         try:
             pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
             phase_velocity = pd_rayleigh.velocity
-
             return phase_velocity
         except (DispersionError, ZeroDivisionError, TypingError) as e:
-            # *** track the type of error ***
-            # failed to find root for fundamental mode
-            # division by zero
-            # raise e
             raise e
 
 

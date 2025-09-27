@@ -53,6 +53,11 @@ def setup_test_model(n_layers):
             # "vel_s": [0.1, 1.8],  # km/s
             "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
         }
+    elif n_layers == 3:
+        bounds = {
+            "depth": np.array([0.001, 0.3]),  # km
+            "vel_s": np.array([0.100, 2.000]),  # km/s
+        }
 
     model_params_kwargs = {
         "n_layers": n_layers,
@@ -81,6 +86,10 @@ def basic_inversion(n_layers, noise, sample_prior, set_starting_model):
         # two layers
         depth = [0.02, 0.04]
         vel_s = [0.2, 0.6, 1.0]
+    elif n_layers == 3:
+        # three layers
+        depth = [0.02, 0.04, 0.1]
+        vel_s = [0.2, 0.6, 1.0, 1.5]
 
     model_params = setup_test_model(n_layers)
     data = setup_test_data(model_params, noise, depth, vel_s)
@@ -118,7 +127,7 @@ def run_inversion():
     sample_prior = False
     set_starting_model = False
     rotate = False
-    n_layers = 2
+    n_layers = 3
     noise = 0.05  # 0.02 # 0.05 # 0.1
 
     inversion, model_params = basic_inversion(
@@ -166,8 +175,11 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
+    # file_name = "1758237723"
     # file_name = "1758298177"
-    file_name = "1758238175"
-    plot_inversion(file_name)
+    # file_name = "1758238175"
+    # file_name = "1758652456"
+
+    # plot_inversion(file_name)

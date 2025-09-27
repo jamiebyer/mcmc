@@ -670,7 +670,6 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     compare saved covariance matrix from sampling and covariance matrix from
     the final, full sample
     """
-    plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
@@ -680,7 +679,9 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     model_params = results_ds["model_params"].values
 
     # normalize model params for computing cov mat
-    model_params_norm = np.empty(model_params.shape)
+    # model_params_norm = np.empty(model_params.shape)
+    model_params_norm = np.full(model_params.shape, np.nan)
+
     param_names = ["depth", "vel_s"]
     bounds = input_ds["param_bounds"].values
     # for s in range(len(results_ds["step"])):
@@ -688,7 +689,8 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
         model_params_norm[:, s] = (model_params[:, s] - bounds[:, 0]) / bounds[:, 2]
 
     mean_diff = (model_params_norm.T - np.mean(model_params_norm, axis=1)).T
-    cov_mat_final = mean_diff @ mean_diff.T
+    cov_mat_final = (1 / mean_diff.shape[1]) * mean_diff @ mean_diff.T
+    # cov_mat_final = np.cov(model_params_norm)
 
     computed_cov_mat = results_ds["cov_mat"][:, :, -1]
 
@@ -698,8 +700,8 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
 
     n_model_params = input_ds.coords["n_model_params"]
 
-    corr_final = np.empty((len(n_model_params), len(n_model_params)))
-    corr_computed = np.empty((len(n_model_params), len(n_model_params)))
+    corr_final = np.full((len(n_model_params), len(n_model_params)), np.nan)
+    corr_computed = np.full((len(n_model_params), len(n_model_params)), np.nan)
 
     for i in n_model_params:
         for j in n_model_params:
@@ -711,7 +713,7 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
             )
 
     corr_percent_diff = np.abs(corr_final - corr_computed) / (
-        np.abs(corr_final - corr_computed) / 2
+        (corr_final + corr_computed) / 2
     )
 
     param_names = []
@@ -721,16 +723,19 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
         for i in range(np.sum(inds.values)):
             param_names.append(p[0] + " " + str(i + 1))
 
+    # plt.clf()
+
     fig, ax = plt.subplots(nrows=2, ncols=3, figsize=(18, 10))
-    im = ax[0, 0].imshow(computed_cov_mat)
+    # computed_cov_mat[computed_cov_mat == 0.0] = np.nan
+    im = ax[0, 0].imshow(computed_cov_mat, interpolation="none")
     ax[0, 0].set_title("cov mat from inversion run")
-    plt.colorbar(im)
+    plt.colorbar(im, ax=ax[0, 0])
     ax[0, 0].set_xticks(n_model_params, param_names)
     ax[0, 0].set_yticks(n_model_params, param_names)
 
     im = ax[0, 1].imshow(cov_mat_final)
     ax[0, 1].set_title("cov mat computed after run")
-    plt.colorbar(im)
+    plt.colorbar(im, ax=ax[0, 1])
     ax[0, 1].set_xticks(n_model_params, param_names)
     ax[0, 1].set_yticks(n_model_params, param_names)
 
