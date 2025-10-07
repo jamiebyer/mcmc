@@ -57,7 +57,7 @@ class Model:
         else:
             self.acceptance_rate = {
                 # "n_prop": np.zeros(n_params),  # proposed
-                "n_acc": 0, # accepted
+                "n_acc": 0,  # accepted
                 "n_rej": 0,  # rejected
                 "n_bounds_err": 0,  # out of bounds error
                 "n_physics_err": 0,  # half-space error
@@ -452,17 +452,29 @@ class Model:
                 self.acceptance_rate["n_rej"][ind] += 1
 
             if self.acceptance_rate["n_rej"][ind] > 0:
-                self.acceptance_rate["acc_rate"][ind] = self.acceptance_rate["n_acc"][ind] / (
-                    self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
+                self.acceptance_rate["acc_rate"][ind] = self.acceptance_rate["n_acc"][
+                    ind
+                ] / (
+                    self.acceptance_rate["n_acc"][ind]
+                    + self.acceptance_rate["n_rej"][ind]
                 )
                 self.acceptance_rate["bounds_err_ratio"][ind] = self.acceptance_rate[
                     "n_bounds_err"
-                ][ind] / (self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind])
+                ][ind] / (
+                    self.acceptance_rate["n_acc"][ind]
+                    + self.acceptance_rate["n_rej"][ind]
+                )
                 self.acceptance_rate["physics_err_ratio"][ind] = self.acceptance_rate[
                     "n_physics_err"
-                ][ind] / (self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind])
-                self.acceptance_rate["fm_err_ratio"][ind] = self.acceptance_rate["n_fm_err"][ind] / (
-                    self.acceptance_rate["n_acc"][ind] + self.acceptance_rate["n_rej"][ind]
+                ][ind] / (
+                    self.acceptance_rate["n_acc"][ind]
+                    + self.acceptance_rate["n_rej"][ind]
+                )
+                self.acceptance_rate["fm_err_ratio"][ind] = self.acceptance_rate[
+                    "n_fm_err"
+                ][ind] / (
+                    self.acceptance_rate["n_acc"][ind]
+                    + self.acceptance_rate["n_rej"][ind]
                 )
         else:
             if acc:
@@ -486,11 +498,9 @@ class Model:
                 self.acceptance_rate["physics_err_ratio"] = self.acceptance_rate[
                     "n_physics_err"
                 ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
-                self.acceptance_rate["fm_err_ratio"] = self.acceptance_rate["n_fm_err"] / (
-                    self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"]
-                )
-
-        
+                self.acceptance_rate["fm_err_ratio"] = self.acceptance_rate[
+                    "n_fm_err"
+                ] / (self.acceptance_rate["n_acc"] + self.acceptance_rate["n_rej"])
 
     #
     # STEPSIZE TUNING

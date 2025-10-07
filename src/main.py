@@ -7,7 +7,8 @@ from inversion.data import SyntheticData
 from inversion.model_params import DispersionCurveParams
 from inversion.inversion import Inversion
 
-from plotting.plot_dispersion_curve import *
+# from plotting.plot_dispersion_curve import *
+from plotting.plot_dispersion_curve_plotly import *
 
 import xarray as xr
 
@@ -157,8 +158,8 @@ def plot_inversion(file_name):
     # plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
 
     # save_inversion_info(input_ds, results_ds, out_filename=file_name)
-    plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=file_name)
-    # model_params_timeseries(input_ds, results_ds, save=False, out_filename=file_name)
+    # plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=file_name)
+    model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
     # model_params_autocorrelation(
     #     input_ds, results_ds, save=False, out_filename=file_name
     # )
@@ -175,11 +176,11 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    run_inversion()
+    # run_inversion()
 
     # file_name = "1758237723"
     # file_name = "1758298177"
     # file_name = "1758238175"
-    # file_name = "1758652456"
+    file_name = "1758652456"
 
-    # plot_inversion(file_name)
+    plot_inversion(file_name)
