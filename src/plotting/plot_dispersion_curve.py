@@ -17,10 +17,6 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-
-    plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
-
-    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -57,8 +53,8 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-    """
 
+    
 def save_inversion_info(input_ds, results_ds, out_filename=""):
     """
     everything should be saved already in input_ds and results_ds.
@@ -607,6 +603,8 @@ def resulting_model_histogram(
         ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
 
     fig.colorbar(h, ax=ax2)
+    ax2.set_xlim([0, 1])
+    ax2.set_ylim([100, 0])
     ax2.set_xlabel("vel s (km/s)")
 
     # make these tick labels invisible
@@ -615,7 +613,7 @@ def resulting_model_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/" + out_filename + "/profile-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/profile-short-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -670,7 +668,8 @@ def plot_data_pred_histogram(
     ax[0].legend()
 
     ax[1].axhline(y=0, c="black")
-    ax[1].scatter(freqs, results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"])
+    residuals = (results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"])/input_ds.attrs["sigma_data"]
+    ax[1].scatter(freqs, residuals)
 
     ax[1].set_xscale("log")
     ax[1].set_xlabel("frequency (Hz)")
