@@ -17,7 +17,6 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-
     plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
 
     """
@@ -58,6 +57,7 @@ def plot_results(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
     """
+
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
     """
@@ -343,7 +343,6 @@ def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
         plt.axhline(input_ds.attrs["logL_true"], c="red")
     plt.xlabel("step")
     plt.ylabel("logL")
-
 
     param_types = ["depth", "vel_s"]
     legend = []
@@ -651,7 +650,9 @@ def plot_data_pred_histogram(
 
     # get data prediction
     pred_ind = np.argmax(results_ds["logL"].values)
-    ax[0].scatter(freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred")
+    ax[0].scatter(
+        freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
+    )
     # estimated error
     # *** depends if it's a percent error or not
     # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
@@ -670,7 +671,9 @@ def plot_data_pred_histogram(
     ax[0].legend()
 
     ax[1].axhline(y=0, c="black")
-    ax[1].scatter(freqs, results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"])
+    ax[1].scatter(
+        freqs, results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
+    )
 
     ax[1].set_xscale("log")
     ax[1].set_xlabel("frequency (Hz)")
@@ -877,3 +880,55 @@ def compare_results():
     # likelihood of most probable model for diff runs
     # BIC (number of parameters vs. likelihood of best model)
     pass
+
+
+def plot_vs30(
+    input_ds,
+    results_ds,
+    save=False,
+    out_filename="",
+):
+    """
+    Vs30 = sum(d_i)/sum(t_i) = 30/sum(d_i/v_i)
+    """
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    depth_inds = input_ds["depth_inds"]
+    vel_s_inds = input_ds["vel_s_inds"]
+
+    n_steps = len(results_ds["step"])
+
+    depth = model_params[depth_inds] * 1000  # unit conversion to m
+    vel_s = model_params[vel_s_inds]
+
+    # what if the half space is above 30 m? it will break?
+
+    depth_boundary = 30
+    Vs30_list = []
+    # for each layer
+    # for each sample / step
+    for step_ind in range(n_steps):
+        # find first depth after 30 m
+        depth_diff = depth[:, step_ind] - depth_boundary
+        # smallest positive number
+        layer_ind = np.argmin(depth_diff[depth_diff > 0])
+
+        Vs30 = 30 / np.sum(depth[:layer_ind, step_ind] / vel_s[:layer_ind, step_ind])
+        Vs30_list.append(Vs30)
+
+    fig = plt.figure()
+    plt.hist(Vs30_list)
+
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/" + out_filename + "/vs30-" + out_filename + ".png")
+    else:
+        plt.show()
