@@ -4,6 +4,8 @@ from matplotlib.colors import LogNorm
 from matplotlib.gridspec import GridSpec
 import json
 import os
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 
 
 def plot_results(
@@ -17,6 +19,16 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+    model_params_timeseries(
+        input_ds,
+        results_ds,
+        save=True,
+        out_filename=out_filename,
+        plot_prob_model=plot_prob_model,
+        plot_true_model=plot_true_model,
+    )
+
+    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -53,6 +65,7 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
+    """
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -117,12 +130,10 @@ def model_params_timeseries(
     :param results_ds:
     """
     # use input_ds to interpret results_ds
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
 
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -140,11 +151,9 @@ def model_params_timeseries(
     n_param_types = len(param_types)
 
     # one column for depth, one for vel_s, one for likelihood and acceptance
-    n_layers = input_ds.attrs["n_layers"]
+    n_layers = int(input_ds.attrs["n_layers"])
 
-    fig, ax = plt.subplots(
-        nrows=n_layers + 1, ncols=n_param_types, sharex=True, figsize=(14, 8)
-    )
+    fig = make_subplots(n_layers + 1, n_param_types)  # , sharex=True, figsize=(14, 8)
 
     # loop over all params and plot
     # use param inds to get param name
@@ -155,32 +164,33 @@ def model_params_timeseries(
         for r_ind, p in enumerate(model_params[inds]):
             legend.append(param + " " + str(r_ind + 1))
             # param timeseries
-            ax[r_ind, c_ind].scatter(
-                step,
-                p,
-                s=2,
-            )
+            fig.append_trace(go.Scatter(x=step, y=p), r_ind + 1, c_ind + 1)
+
             # true model
             if plot_true_model:
-                ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
+                fig.add_vline(true_model[inds][r_ind], r_ind + 1, c_ind + 1)
+                # ax[r_ind, c_ind].axhline(true_model[inds][r_ind], c="red")
             # most probable model
             if plot_prob_model:
-                ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+                fig.add_vline(probable_model[inds][r_ind], r_ind + 1, c_ind + 1)
+                # ax[r_ind, c_ind].axhline(probable_model[inds][r_ind], c="purple")
+
             # bounds
-            ax[r_ind, c_ind].set_ylim([bounds[r_ind][0], bounds[r_ind][1]])
+            fig.update_yaxes(
+                title_text=param + " " + str(r_ind + 1),
+                range=[bounds[r_ind][0], bounds[r_ind][1]],
+                row=r_ind + 1,
+                col=c_ind + 1,
+            )
 
-            # axis labels
-            ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
-            ax[r_ind, c_ind].set_xlabel("step")
+            fig.update_xaxes(title_text="step", row=r_ind + 1, col=c_ind + 1)
 
-    # plt.subplots_adjust(wspace=0.1, hspace=0.1)
-    plt.tight_layout()
-    plt.suptitle("model params timeseries")
+    fig.update_layout(title_text="model params timeseries")
 
     if save:
-        plt.savefig("figures/" + out_filename + "/time-" + out_filename + ".png")
+        fig.write_html("figures/" + out_filename + "/time-" + out_filename + ".html")
     else:
-        plt.show()
+        fig.show()
 
 
 def model_params_stepsize(
@@ -202,12 +212,9 @@ def model_params_stepsize(
     """
     # use input_ds to interpret results_ds
 
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -286,12 +293,9 @@ def model_params_autocorrelation(
     """
     # use input_ds to interpret results_ds
 
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -332,13 +336,9 @@ def model_params_autocorrelation(
 
 
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
-
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -403,12 +403,10 @@ def model_params_histogram(
     :param results_ds:
     """
     # use input_ds to interpret results_ds
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
 
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -495,13 +493,9 @@ def resulting_model_histogram(
     plot the resulting model as velocity vs. depth
     with the histogram of probability for the depth of the layer
     """
-
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -620,8 +614,6 @@ def resulting_model_histogram(
         ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
 
     fig.colorbar(h, ax=ax2)
-    # ax2.set_xlim([0, 1])
-    # ax2.set_ylim([100, 0])
     ax2.set_xlabel("vel s (km/s)")
 
     # make these tick labels invisible
@@ -642,14 +634,10 @@ def plot_data_pred_histogram(
     plot all data predictions as a histogram.
     plot true data, observed data, and predicted data for the most probable model.
     """
-
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
@@ -691,10 +679,9 @@ def plot_data_pred_histogram(
     ax[0].legend()
 
     ax[1].axhline(y=0, c="black")
-    residuals = (
-        results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
-    ) / input_ds.attrs["sigma_data"]
-    ax[1].scatter(freqs, residuals)
+    ax[1].scatter(
+        freqs, results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
+    )
 
     ax[1].set_xscale("log")
     ax[1].set_xlabel("frequency (Hz)")
@@ -711,13 +698,9 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     compare saved covariance matrix from sampling and covariance matrix from
     the final, full sample
     """
-    n_burn = input_ds.attrs["n_burn"]
-    # n_burn = int(len(results_ds["step"])/3)
-
-    plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -822,13 +805,10 @@ def plot_timestep_covariance_matrix(input_ds, results_ds, save=False, out_filena
     plot correlation / covariance matrix for different timesteps
     """
 
-    # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
-
     plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
     timesteps = [3000, 8000, 15000]
@@ -908,55 +888,3 @@ def compare_results():
     # likelihood of most probable model for diff runs
     # BIC (number of parameters vs. likelihood of best model)
     pass
-
-
-def plot_vs30(
-    input_ds,
-    results_ds,
-    save=False,
-    out_filename="",
-):
-    """
-    Vs30 = sum(d_i)/sum(t_i) = 30/sum(d_i/v_i)
-    """
-
-    # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
-    )
-
-    # use results_ds to get model params
-    model_params = results_ds["model_params"].values
-
-    depth_inds = input_ds["depth_inds"]
-    vel_s_inds = input_ds["vel_s_inds"]
-
-    n_steps = len(results_ds["step"])
-
-    depth = model_params[depth_inds] * 1000  # unit conversion to m
-    vel_s = model_params[vel_s_inds]
-
-    # what if the half space is above 30 m? it will break?
-
-    depth_boundary = 30
-    Vs30_list = []
-    # for each layer
-    # for each sample / step
-    for step_ind in range(n_steps):
-        # find first depth after 30 m
-        depth_diff = depth[:, step_ind] - depth_boundary
-        # smallest positive number
-        layer_ind = np.argmin(depth_diff[depth_diff > 0])
-
-        Vs30 = 30 / np.sum(depth[:layer_ind, step_ind] / vel_s[:layer_ind, step_ind])
-        Vs30_list.append(Vs30)
-
-    fig = plt.figure()
-    plt.hist(Vs30_list)
-
-    plt.tight_layout()
-
-    if save:
-        plt.savefig("figures/" + out_filename + "/vs30-" + out_filename + ".png")
-    else:
-        plt.show()
