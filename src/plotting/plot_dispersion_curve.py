@@ -117,10 +117,12 @@ def model_params_timeseries(
     :param results_ds:
     """
     # use input_ds to interpret results_ds
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
 
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -200,9 +202,12 @@ def model_params_stepsize(
     """
     # use input_ds to interpret results_ds
 
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -281,9 +286,12 @@ def model_params_autocorrelation(
     """
     # use input_ds to interpret results_ds
 
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -324,9 +332,13 @@ def model_params_autocorrelation(
 
 
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -392,10 +404,12 @@ def model_params_histogram(
     :param results_ds:
     """
     # use input_ds to interpret results_ds
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
 
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -482,9 +496,13 @@ def resulting_model_histogram(
     plot the resulting model as velocity vs. depth
     with the histogram of probability for the depth of the layer
     """
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -603,8 +621,8 @@ def resulting_model_histogram(
         ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
 
     fig.colorbar(h, ax=ax2)
-    ax2.set_xlim([0, 1])
-    ax2.set_ylim([100, 0])
+    # ax2.set_xlim([0, 1])
+    # ax2.set_ylim([100, 0])
     ax2.set_xlabel("vel s (km/s)")
 
     # make these tick labels invisible
@@ -613,7 +631,7 @@ def resulting_model_histogram(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/" + out_filename + "/profile-short-" + out_filename + ".png")
+        plt.savefig("figures/" + out_filename + "/profile-" + out_filename + ".png")
     else:
         plt.show()
 
@@ -625,10 +643,14 @@ def plot_data_pred_histogram(
     plot all data predictions as a histogram.
     plot true data, observed data, and predicted data for the most probable model.
     """
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
@@ -686,10 +708,13 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
     compare saved covariance matrix from sampling and covariance matrix from
     the final, full sample
     """
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -788,10 +813,13 @@ def plot_timestep_covariance_matrix(input_ds, results_ds, save=False, out_filena
     plot correlation / covariance matrix for different timesteps
     """
 
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
+
     plt.clf()
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     timesteps = [3000, 8000, 15000]
