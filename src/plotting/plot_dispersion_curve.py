@@ -901,15 +901,24 @@ def plot_vs30(
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
 
+    depth_bounds = input_ds["param_bounds"][input_ds["depth_inds"]]
+
     depth_inds = input_ds["depth_inds"]
     vel_s_inds = input_ds["vel_s_inds"]
 
     n_steps = len(results_ds["step"])
 
     depth = model_params[depth_inds] * 1000  # unit conversion to m
-    vel_s = model_params[vel_s_inds]
+    depth_plotting = np.concatenate(
+        (
+            np.zeros((1, n_steps)),
+            depth,
+            np.full((1, n_steps), np.max(depth_bounds[:, 1])) * 1000,  # unit conversion
+        ),
+        axis=0,
+    )
 
-    # what if the half space is above 30 m? it will break?
+    vel_s = model_params[vel_s_inds]
 
     depth_boundary = 30
     Vs30_list = []
@@ -917,15 +926,26 @@ def plot_vs30(
     # for each sample / step
     for step_ind in range(n_steps):
         # find first depth after 30 m
-        depth_diff = depth[:, step_ind] - depth_boundary
+        depth_diff = depth_plotting[:, step_ind] - depth_boundary
+        depth_diff[depth_diff < 0] = np.inf
         # smallest positive number
-        layer_ind = np.argmin(depth_diff[depth_diff > 0])
+        layer_ind = np.argmin(depth_diff)
+        depth_plotting[layer_ind] = 30
 
-        Vs30 = 30 / np.sum(depth[:layer_ind, step_ind] / vel_s[:layer_ind, step_ind])
+        thickness = (
+            depth_plotting[1 : layer_ind + 1, step_ind]
+            - depth_plotting[:layer_ind, step_ind]
+        )
+
+        Vs30 = 30 / np.sum(
+            thickness[: layer_ind + 1] / vel_s[: layer_ind + 1, step_ind]
+        )
         Vs30_list.append(Vs30)
 
     fig = plt.figure()
-    plt.hist(Vs30_list)
+    for c in [180, 360, 760, 1500]:
+        plt.axvline(c)
+    plt.hist(np.array(Vs30_list) * 1000, bins=100)
 
     plt.tight_layout()
 
