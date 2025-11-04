@@ -17,6 +17,7 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -53,6 +54,8 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
+    """
+    plot_vs30(input_ds, results_ds, save=True)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
