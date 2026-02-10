@@ -5,6 +5,8 @@ from matplotlib.gridspec import GridSpec
 import json
 import os
 
+from disba import PhaseDispersion
+
 
 def plot_results(
     input_ds,
@@ -906,7 +908,7 @@ def compare_rotation():
     pass
 
 
-def compare_results():
+def compare_n_layers():
     # likelihood of most probable model for diff runs
     # BIC (number of parameters vs. likelihood of best model)
     pass
@@ -1005,5 +1007,84 @@ def plot_vs30(
 
     if save:
         plt.savefig("figures/" + out_filename + "/vs30-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def plot_surface_waves(input_ds, results_ds, n_bins=100, save=False, out_filename=""):
+    """
+    Look at some resulting models from the inversion.
+    Use disba to plot Rayleigh waves and Love waves.
+
+    data pred type plot for Love waves?
+    """
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(
+        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+    )
+
+    periods = input_ds["period"]
+    freqs = 1 / periods
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    depth_inds = input_ds["depth_inds"]
+    vel_s_inds = input_ds["vel_s_inds"]
+
+    vpvs_ratio = input_ds.attrs["vpvs_ratio"]
+
+    print(model_params.shape)
+
+    pd_rayleigh_list, pd_love_list = [], []
+    # loop over each model
+    for m in model_params:
+        # get rayleigh and love dispersion curves for each model
+        depth = m[depth_inds]
+        vel_s = m[vel_s_inds]
+
+        # get thicknesses
+        depth = np.concatenate(([0], depth))
+        thickness = np.concatenate((depth[1:] - depth[:-1], [0]))
+
+        vel_p = vel_s * vpvs_ratio
+        density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
+        # avoid converting thickness back and forth from list
+        velocity_model = np.array([thickness, vel_p, vel_s, density])
+
+        # phase dispersion object
+        pd = PhaseDispersion(*velocity_model)
+
+        pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+        pd_love = pd(periods, mode=0, wave="love")
+
+        pd_rayleigh_list.append(pd_rayleigh.velocity)
+        pd_love_list.append(pd_love.velocity)
+
+    # plotting
+    plt.clf()
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
+
+    # flatten data_pred, repeat period
+    # hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
+    # data_preds = results_ds["data_pred"].values.flatten()
+
+    ax[0].hist2d(freqs, pd_rayleigh_list, bins=n_bins, cmin=1, norm="log")
+    ax[1].hist2d(freqs, pd_love_list, bins=n_bins, cmin=1, norm="log")
+    # fig.colorbar(im, ax=ax, label="count")
+
+    ax[0].set_xscale("log")
+    ax[0].set_xlabel("frequency (Hz)")
+    ax[0].set_ylabel("velocity (km/s)")
+
+    ax[1].set_xscale("log")
+    ax[1].set_xlabel("frequency (Hz)")
+    ax[1].set_ylabel("velocity (km/s)")
+
+    if save:
+        plt.savefig(
+            "figures/" + out_filename + "/surface-waves-" + out_filename + ".png"
+        )
     else:
         plt.show()
