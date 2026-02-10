@@ -17,7 +17,7 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-    """
+
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -54,8 +54,7 @@ def plot_results(
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
-    """
-    plot_vs30(input_ds, results_ds, save=True)
+    plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -921,11 +920,21 @@ def plot_vs30(
 ):
     """
     Vs30 = sum(d_i)/sum(t_i) = 30/sum(d_i/v_i)
+    
+    Description	VS30 range (m/s)
+    Hard rock	1500
+    Rock	760-1500
+    Very dense soil and soft rock	360-760
+    Stiff soil	180-360
+    Soil with soft clay	<180
+    Site-specific analysis required	---
     """
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"])/3)
 
     # cut results by step
     results_ds = results_ds.copy().isel(
-        step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
+        step=slice(n_burn, len(results_ds["step"]))
     )
 
     # use results_ds to get model params
@@ -958,6 +967,7 @@ def plot_vs30(
         # find first depth after 30 m
         depth_diff = depth_plotting[:, step_ind] - depth_boundary
         depth_diff[depth_diff < 0] = np.inf
+        
         # smallest positive number
         layer_ind = np.argmin(depth_diff)
         depth_plotting[layer_ind] = 30
@@ -968,14 +978,28 @@ def plot_vs30(
         )
 
         Vs30 = 30 / np.sum(
-            thickness[: layer_ind + 1] / vel_s[: layer_ind + 1, step_ind]
+            thickness[: layer_ind + 1] / vel_s[: layer_ind, step_ind]
         )
         Vs30_list.append(Vs30)
 
     fig = plt.figure()
-    for c in [180, 360, 760, 1500]:
-        plt.axvline(c)
-    plt.hist(np.array(Vs30_list) * 1000, bins=100)
+
+    plt.hist(np.array(Vs30_list) * 1000, bins=100, density=True)
+
+
+    classes = [
+        ["A", "Hard\nrock", 1500, 1550],
+        ["B", "Rock", 760, 900],
+        ["C", "Very dense\nsoil and soft rock", 360, 380],
+        ["D", "Stiff\nsoil", 180, 230],
+        ["E", "Soil with\nsoft clay", 0, 0],
+    ]
+    for c, name, vert, loc in classes:
+        plt.text(loc, 0.11, name)
+        plt.axvline(vert, c="k", ls="-")
+
+    # add percentage for classification
+
 
     plt.tight_layout()
 
