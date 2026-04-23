@@ -3,6 +3,8 @@ from disba import PhaseDispersion
 from disba._exception import DispersionError
 from inversion.model import Model
 
+import matplotlib.pyplot as plt
+
 np.complex_ = np.complex64
 
 
@@ -38,10 +40,12 @@ class FieldData(Data):
 
 
 class SyntheticData(Data):
-    def __init__(self, periods, noise, model_params_obj, depth, vel_s):
+    def __init__(
+        self, periods, noise_dist, noise_params, model_params_obj, depth, vel_s
+    ):
         """ """
         data_true, data_obs, sigma_data, model_params = self.generate_observed_data(
-            periods, noise, model_params_obj, depth, vel_s
+            periods, noise_dist, noise_params, model_params_obj, depth, vel_s
         )
         self.data_true = data_true
         self.model_true = model_params
@@ -84,14 +88,81 @@ class SyntheticData(Data):
 
         return data_true, data_obs, sigma_data, model_true
 
-    def generate_observed_data(self, periods, noise, model_params_obj, depth, vel_s):
+    def generate_observed_data(
+        self, periods, noise_dist, noise_params, model_params_obj, depth, vel_s
+    ):
         model_params = np.array(depth + vel_s)
         # use forward_model function
         data_true = model_params_obj.forward_model(periods, model_params)
 
-        # sigma_data is a percentage, so multiply by true data
-        sigma_data = noise * data_true
-        data_obs = data_true + sigma_data * np.random.randn(len(periods))
+        if noise_dist == "normal":
+            noise_percent = noise_params
+            sigma_data = noise_percent * data_true
+
+            # sigma_data is a percentage, so multiply by true data
+            data_obs = data_true + sigma_data * np.random.randn(len(periods))
+
+        elif noise_dist == "asym-laplace":
+            AL_q_5_list, AL_q_95_list = [], []
+            norm_q_5_list, norm_q_95_list = [], []
+
+            noise_percent, lambd, kappa = noise_params
+            sigma_data = noise_percent * data_true
+
+            mu = 0
+            lambd = (1 / (3.5 * sigma_data)) * lambd
+
+            x = np.linspace(-100, 100, 100000)
+
+            noise = []
+            for ind in range(len(data_true)):
+                s = np.sign(x - mu)
+                pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
+                    -(x - mu) * lambd[ind] * s * kappa**s
+                )
+
+                norm_pdf = (1 / np.sqrt(2 * np.pi * sigma_data[ind] ** 2)) * np.exp(
+                    -((x - mu) ** 2 / (2 * sigma_data[ind] ** 2))
+                )
+
+                # integrate distribution
+                # the cdf should go from 0 to 1
+                dx = x[1] - x[0]
+                cdf = np.cumsum(((pdf[:-1] + pdf[1:]) / 2) * dx)
+                norm_cdf = np.cumsum(((norm_pdf[:-1] + norm_pdf[1:]) / 2) * dx)
+
+                q_5 = x[np.argmin(np.abs(cdf - 0.05))]
+                q_95 = x[np.argmin(np.abs(cdf - 0.95))]
+                AL_q_5_list.append(q_5)
+                AL_q_95_list.append(q_95)
+
+                q_5 = x[np.argmin(np.abs(norm_cdf - 0.05))]
+                q_95 = x[np.argmin(np.abs(norm_cdf - 0.95))]
+                norm_q_5_list.append(q_5)
+                norm_q_95_list.append(q_95)
+
+                # generate a random uniform number between 0 and 1
+                n = np.random.uniform(0, 1)
+
+                # use to select value from inverse of cdf
+                ind = np.argmin(np.abs(cdf - n))
+                x_pick = (x[ind] + x[ind + 1]) / 2
+
+                noise.append(x_pick)
+
+            data_obs = data_true + noise
+
+        plt.scatter(periods, data_true)
+        plt.scatter(periods, data_obs)
+
+        plt.plot(periods, data_true + np.array(AL_q_5_list), c="red")
+        plt.plot(periods, data_true + np.array(AL_q_95_list), c="red")
+
+        plt.plot(periods, data_true + np.array(norm_q_5_list), c="orange")
+        plt.plot(periods, data_true + np.array(norm_q_95_list), c="orange")
+
+        plt.show()
+
         return data_true, data_obs, sigma_data, model_params
 
     def get_data_dict(self):

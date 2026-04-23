@@ -178,43 +178,45 @@ class Inversion:
         }
         # acceptance rates / errors
         if self.individual_acceptance:
-            self.ds_storage["data_vars"].update({
-                "acc_rate": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "bounds_err": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "physics_err": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "fm_err": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
+            self.ds_storage["data_vars"].update(
+                {
+                    "acc_rate": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    },
+                    "bounds_err": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    },
+                    "physics_err": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    },
+                    "fm_err": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    },
                 }
             )
         else:
-            self.ds_storage["data_vars"].update({
-                "acc_rate": {
-                    "dims": ["step"],
-                    "data": np.empty(self.n_chunk),
-                },
-                "bounds_err": {
-                    "dims": ["step"],
-                    "data": np.empty(self.n_chunk),
-                },
-                "physics_err": {
-                    "dims": ["step"],
-                    "data": np.empty(self.n_chunk),
-                },
-                "fm_err": {
-                    "dims": ["step"],
-                    "data": np.empty(self.n_chunk),
-                },
+            self.ds_storage["data_vars"].update(
+                {
+                    "acc_rate": {
+                        "dims": ["step"],
+                        "data": np.empty(self.n_chunk),
+                    },
+                    "bounds_err": {
+                        "dims": ["step"],
+                        "data": np.empty(self.n_chunk),
+                    },
+                    "physics_err": {
+                        "dims": ["step"],
+                        "data": np.empty(self.n_chunk),
+                    },
+                    "fm_err": {
+                        "dims": ["step"],
+                        "data": np.empty(self.n_chunk),
+                    },
                 }
             )
 
@@ -437,7 +439,7 @@ class Inversion:
                     )
                     # error ratio
                     self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
-                       chain.acceptance_rate["bounds_err_ratio"]
+                        chain.acceptance_rate["bounds_err_ratio"]
                     )
                     self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
                         chain.acceptance_rate["physics_err_ratio"]

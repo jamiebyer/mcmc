@@ -412,7 +412,6 @@ class Model:
         # logL = residuals.T @ cov_inv @ residuals
 
         # for identical errors
-        # logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
         logL = -np.sum((residuals**2) / (2 * sigma_data**2))
 
         return logL
