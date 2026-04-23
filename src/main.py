@@ -167,7 +167,9 @@ def plot_inversion(file_name):
     # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
-    plot_vs30(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_vs30(input_ds, results_ds, save=True, out_filename=file_name)
+    
+    plot_surface_waves(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":

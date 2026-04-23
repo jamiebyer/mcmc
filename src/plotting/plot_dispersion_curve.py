@@ -19,7 +19,7 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-
+    # """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -57,6 +57,8 @@ def plot_results(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
     plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
+    # """
+    plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -1024,18 +1026,16 @@ def plot_surface_waves(input_ds, results_ds, n_bins=100, save=False, out_filenam
         step=slice(input_ds.attrs["n_burn"], len(results_ds["step"]))
     )
 
-    periods = input_ds["period"]
+    periods = input_ds["period"].values
     freqs = 1 / periods
 
     # use results_ds to get model params
-    model_params = results_ds["model_params"].values
+    model_params = results_ds["model_params"].values.T
 
     depth_inds = input_ds["depth_inds"]
     vel_s_inds = input_ds["vel_s_inds"]
 
     vpvs_ratio = input_ds.attrs["vpvs_ratio"]
-
-    print(model_params.shape)
 
     pd_rayleigh_list, pd_love_list = [], []
     # loop over each model
@@ -1067,11 +1067,14 @@ def plot_surface_waves(input_ds, results_ds, n_bins=100, save=False, out_filenam
     fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
 
     # flatten data_pred, repeat period
-    # hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
+    hist_freqs = np.repeat(freqs, model_params.shape[0])
     # data_preds = results_ds["data_pred"].values.flatten()
 
-    ax[0].hist2d(freqs, pd_rayleigh_list, bins=n_bins, cmin=1, norm="log")
-    ax[1].hist2d(freqs, pd_love_list, bins=n_bins, cmin=1, norm="log")
+    pd_rayleigh_list = np.array(pd_rayleigh_list).T.flatten()
+    pd_love_list = np.array(pd_love_list).T.flatten()
+    print(freqs.shape, hist_freqs.shape, pd_rayleigh_list.shape, pd_love_list.shape)
+    ax[0].hist2d(hist_freqs, pd_rayleigh_list, bins=n_bins, cmin=1, norm="log")
+    ax[1].hist2d(hist_freqs, pd_love_list, bins=n_bins, cmin=1, norm="log")
     # fig.colorbar(im, ax=ax, label="count")
 
     ax[0].set_xscale("log")
