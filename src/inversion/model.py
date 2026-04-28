@@ -9,7 +9,8 @@ class Model:
     def __init__(
         self,
         model_params,
-        sigma_data,
+        noise_dist,
+        noise_params,
         n_cov_chunk,
         individual_acceptance,
         beta=None,
@@ -25,14 +26,15 @@ class Model:
         self.individual_acceptance = individual_acceptance
 
         self.model_params = model_params
-        self.sigma_data = sigma_data
+        self.noise_dist = noise_dist
+        self.noise_params = noise_params
 
-        if isinstance(self.sigma_data, float):
-            self.cov_data_inv = np.diag(
-                self.model_params.n_model_params * [1 / self.sigma_data**2]
-            )
-        else:
-            self.cov_data_inv = np.diag(1 / self.sigma_data**2)  # ***
+        # if isinstance(self.sigma_data, float):
+        #     self.cov_data_inv = np.diag(
+        #         self.model_params.n_model_params * [1 / self.sigma_data**2]
+        #     )
+        # else:
+        #     self.cov_data_inv = np.diag(1 / self.sigma_data**2)  # ***
 
         # get generic param_bounds and posterior width from model_params
         self.param_bounds = model_params.assemble_param_bounds()
@@ -220,7 +222,7 @@ class Model:
 
         if valid_params:
             # calculate likelihood with predicted data
-            logL_new = Model.get_likelihood(data, data_pred_new, self.sigma_data)
+            logL_new = Model.get_likelihood(data, data_pred_new, self.noise_dist, self.noise_params)
             # check acceptance criteria
             acc = self.acceptance_criteria(logL_new, T=T)
             if acc:
@@ -400,20 +402,21 @@ class Model:
     #
 
     @staticmethod
-    def get_likelihood(data, data_pred, sigma_data):
+    def get_likelihood(data, data_pred, noise_dist, noise_params):
         """
         :param velocity_model:
         :param data:
         """
         residuals = data.data_obs - data_pred
 
-        # cov_inv = data.data_cov
-        # cov_inv[cov_inv != 0] = 1 / data.data_cov[cov_inv != 0]
-        # logL = residuals.T @ cov_inv @ residuals
-
-        # for identical errors
-        # logL = -np.sum(residuals**2) / (2 * self.sigma_data**2)
-        logL = -np.sum((residuals**2) / (2 * sigma_data**2))
+        sigma_data = noise_params["noise_percent"]
+        if noise_dist == "normal":
+            logL = -np.sum((residuals**2) / (2 * sigma_data**2))
+        elif noise_dist == "asym-laplace":
+            lambd, kappa = noise_params["lambd"], noise_params["kappa"]
+            lambd = sigma_data*lambd
+            s = np.sign(residuals)
+            logL = -np.sum(np.log(lambd/(kappa + (1/kappa))) - (residuals*lambd*s*(kappa**s)))
 
         return logL
 

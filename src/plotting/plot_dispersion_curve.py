@@ -663,7 +663,8 @@ def plot_data_pred_histogram(
 
     if "data_true" in input_ds:
         ax[0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
-    yerr = input_ds.attrs["sigma_data"]
+    print(input_ds.attrs)
+    yerr = input_ds.attrs["noise_percent"]
     ax[0].errorbar(
         freqs,
         input_ds["data_obs"],
@@ -699,7 +700,7 @@ def plot_data_pred_histogram(
     ax[1].axhline(y=0, c="black")
     residuals = (
         results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
-    ) / input_ds.attrs["sigma_data"]
+    ) / input_ds.attrs["noise_percent"]
     ax[1].scatter(freqs, residuals)
 
     ax[1].set_xscale("log")
