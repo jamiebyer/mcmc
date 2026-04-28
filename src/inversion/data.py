@@ -9,16 +9,17 @@ np.complex_ = np.complex64
 
 
 class Data:
-    def __init__(self, periods, data_obs, sigma_data):
+    def __init__(self, periods, data_obs, noise_dist, noise_params):
         self.periods = periods
         self.data_obs = data_obs
         self.n_data = len(self.data_obs)
-        self.sigma_data = sigma_data
+        self.noise_dist = noise_dist
+        self.noise_params = noise_params
 
-        if isinstance(sigma_data, list) and len(sigma_data) == self.n_data:
-            self.data_cov = np.diag(sigma_data**2)
-        elif isinstance(sigma_data, float):
-            self.data_cov = np.eye(self.n_data) * sigma_data**2
+        # if isinstance(sigma_data, list) and len(sigma_data) == self.n_data:
+        #     self.data_cov = np.diag(sigma_data**2)
+        # elif isinstance(sigma_data, float):
+        #     self.data_cov = np.eye(self.n_data) * sigma_data**2
 
     def get_data_dict(self):
         data_dict = {
@@ -28,8 +29,11 @@ class Data:
             "data_vars": {
                 "data_obs": {"dims": ["period"], "data": self.data_obs},
             },
-            "attrs": {"sigma_data": self.sigma_data},
+            "attrs": {"noise_dist": self.noise_dist},
         }
+
+        for k, v in self.noise_params.items():
+            data_dict["attrs"][k] = v
 
         return data_dict
 
@@ -50,10 +54,11 @@ class SyntheticData(Data):
         self.data_true = data_true
         self.model_true = model_params
 
-        super().__init__(periods, data_obs, sigma_data)
+        super().__init__(periods, data_obs, noise_dist, noise_params)
 
         # get true likelihood
-        self.logL_true = Model.get_likelihood(self, data_true, sigma_data)
+        noise_params["noise_percent"] = sigma_data
+        self.logL_true = Model.get_likelihood(self, data_true, noise_dist, noise_params)
 
     def generate_true_model(self, periods, noise, bounds, n_layers):
         """
@@ -95,10 +100,9 @@ class SyntheticData(Data):
         # use forward_model function
         data_true = model_params_obj.forward_model(periods, model_params)
 
+        noise_percent = noise_params["noise_percent"]
         if noise_dist == "normal":
-            noise_percent = noise_params
             sigma_data = noise_percent * data_true
-
             # sigma_data is a percentage, so multiply by true data
             data_obs = data_true + sigma_data * np.random.randn(len(periods))
 
@@ -106,7 +110,7 @@ class SyntheticData(Data):
             AL_q_5_list, AL_q_95_list = [], []
             norm_q_5_list, norm_q_95_list = [], []
 
-            noise_percent, lambd, kappa = noise_params
+            lambd, kappa = noise_params["lambd"], noise_params["kappa"]
             sigma_data = noise_percent * data_true
 
             mu = 0
@@ -163,7 +167,6 @@ class SyntheticData(Data):
 
         plt.show()
         """
-
         return data_true, data_obs, sigma_data, model_params
 
     def get_data_dict(self):

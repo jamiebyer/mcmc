@@ -20,7 +20,8 @@ class Inversion:
         self,
         data,
         model_params,
-        sigma_data,
+        noise_dist,
+        noise_params,
         n_burn,
         n_chunk,
         n_mcmc,
@@ -48,7 +49,7 @@ class Inversion:
         run options:
         - run with optimized starting model
         - run with burn-in
-        - run with linearlization
+        - run with linearization
         - run with parallel tempering/ chains
         """
 
@@ -67,7 +68,8 @@ class Inversion:
         self.n_chains = n_chains
         self.initialize_chains(
             model_params,
-            sigma_data,
+            noise_dist,
+            noise_params,
             n_cov_chunk,
             individual_acceptance,
             beta_spacing_factor,
@@ -292,7 +294,8 @@ class Inversion:
     def initialize_chains(
         self,
         model_params,
-        sigma_data,
+        noise_dist,
+        noise_params,
         n_cov_chunk,
         individual_acceptance,
         beta_spacing_factor,
@@ -312,7 +315,8 @@ class Inversion:
         for ind in range(self.n_chains):
             model = Model(
                 deepcopy(model_params),
-                sigma_data,
+                noise_dist,
+                noise_params,
                 n_cov_chunk,
                 individual_acceptance,
                 betas[ind],
@@ -323,7 +327,7 @@ class Inversion:
                 data_pred = self.model_params.forward_model(
                     self.data.periods, test_params
                 )
-                logL_new = Model.get_likelihood(self.data, data_pred, model.sigma_data)
+                logL_new = Model.get_likelihood(self.data, data_pred, model.noise_dist, model.noise_params)
                 valid_params = True
             else:
                 # initialize model params
@@ -336,7 +340,7 @@ class Inversion:
                             self.data.periods, test_params
                         )
                         logL_new = Model.get_likelihood(
-                            self.data, data_pred, model.sigma_data
+                            self.data, data_pred, model.noise_dist, model.noise_params
                         )
                         valid_params = True
                     except (DispersionError, ZeroDivisionError, TypeError):

@@ -109,12 +109,11 @@ def basic_inversion(
         "set_starting_model": set_starting_model,
     }
 
-    if inv_noise_dist == "normal":
-        sigma_data = noise_params
-        model_kwargs = {"sigma_data": sigma_data * data.data_obs}
-    elif inv_noise_dist == "asym-laplace":
-        sigma_data = noise_params
-        model_kwargs = {"sigma_data": sigma_data * data.data_obs}
+    mod_noise_params = noise_params.copy()
+    mod_noise_params["noise_percent"] = (
+        mod_noise_params["noise_percent"] * data.data_obs
+    )
+    model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": noise_params}
 
     # run inversion
     inversion = Inversion(
@@ -136,8 +135,10 @@ def run_inversion():
     sample_prior = False
     set_starting_model = False
     rotate = False
-    n_layers = 3
+    n_layers = 2
+    # noise_dist = "normal"
     noise_dist = "asym-laplace"
+    # inv_noise_dist = "normal"
     inv_noise_dist = "asym-laplace"
     # noise_percent = 0.05  # 0.02 # 0.05 # 0.1
     noise_percent = 0.10
@@ -147,7 +148,7 @@ def run_inversion():
     inversion, model_params = basic_inversion(
         n_layers=n_layers,
         noise_dist=noise_dist,
-        noise_params=(noise_percent, lambd, kappa),
+        noise_params={"noise_percent": noise_percent, "lambd": lambd, "kappa": kappa},
         inv_noise_dist=inv_noise_dist,
         sample_prior=sample_prior,
         set_starting_model=set_starting_model,
@@ -169,7 +170,7 @@ def plot_inversion(file_name):
     input_ds = xr.open_dataset(input_path)
     results_ds = xr.open_dataset(results_path)
 
-    # plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
+    plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
 
     # save_inversion_info(input_ds, results_ds, out_filename=file_name)
     # plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=file_name)
@@ -182,7 +183,7 @@ def plot_inversion(file_name):
     # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
     # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
     # plot_vs30(input_ds, results_ds, save=True, out_filename=file_name)
-    plot_surface_waves(input_ds, results_ds, save=True, out_filename=file_name)
+    # plot_surface_waves(input_ds, results_ds, save=True, out_filename=file_name)
 
 
 if __name__ == "__main__":
@@ -192,11 +193,15 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    run_inversion()
+    # run_inversion()
 
-    # file_name = "1758237723"
-    # file_name = "1758298177"
-    # file_name = "1758238175"
-    # file_name = "1758652456"
+    # data: AL, model: normal
+    # file_name = "1776911082" # first run, 3 layers, not converged
+    # file_name = "1777403132" # 2 layers, starting_model=False
+    # file_name = "1777403352" # 2 layers, starting_model=True
 
-    # plot_inversion(file_name)
+    # data: AL, model: AL
+    # file_name = "1777403603" # 2 layers, starting_model=True
+    # file_name = "1777403720" # 2 layers, starting_model=False
+
+    plot_inversion(file_name)
