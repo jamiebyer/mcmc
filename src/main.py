@@ -112,6 +112,9 @@ def basic_inversion(
     if inv_noise_dist == "normal":
         sigma_data = noise_params
         model_kwargs = {"sigma_data": sigma_data * data.data_obs}
+    elif inv_noise_dist == "asym-laplace":
+        sigma_data = noise_params
+        model_kwargs = {"sigma_data": sigma_data * data.data_obs}
 
     # run inversion
     inversion = Inversion(

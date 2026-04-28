@@ -151,7 +151,7 @@ class SyntheticData(Data):
                 noise.append(x_pick)
 
             data_obs = data_true + noise
-
+        """
         plt.scatter(periods, data_true)
         plt.scatter(periods, data_obs)
 
@@ -162,6 +162,7 @@ class SyntheticData(Data):
         plt.plot(periods, data_true + np.array(norm_q_95_list), c="orange")
 
         plt.show()
+        """
 
         return data_true, data_obs, sigma_data, model_params
 
