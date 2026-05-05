@@ -13,7 +13,6 @@ from plotting.plot_dispersion_curve import *
 
 import xarray as xr
 
-
 np.random.seed(0)
 
 
@@ -193,7 +192,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
     # data: AL, model: normal
     # file_name = "1776911082" # first run, 3 layers, not converged
@@ -204,4 +203,4 @@ if __name__ == "__main__":
     # file_name = "1777403603" # 2 layers, starting_model=True
     # file_name = "1777403720" # 2 layers, starting_model=False
 
-    plot_inversion(file_name)
+    # plot_inversion(file_name)
