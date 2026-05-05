@@ -13,7 +13,6 @@ from plotting.plot_dispersion_curve import *
 
 import xarray as xr
 
-
 np.random.seed(0)
 
 
@@ -52,7 +51,7 @@ def setup_test_model(n_layers):
         }
     elif n_layers == 2:
         bounds = {
-            "depth": np.array([0.001, 0.3]),  # km
+            "depth": np.array([0.001, 0.15]),  # km
             # "vel_s": [0.1, 1.8],  # km/s
             "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
         }
@@ -88,8 +87,8 @@ def basic_inversion(
         vel_s = [0.4, 1.0]
     elif n_layers == 2:
         # two layers
-        depth = [0.02, 0.04]
-        vel_s = [0.2, 0.6, 1.0]
+        depth = [0.02, 0.08]
+        vel_s = [0.2, 0.6, 1.5]
     elif n_layers == 3:
         # three layers
         depth = [0.02, 0.04, 0.1]
@@ -133,11 +132,11 @@ def run_inversion():
     - Run with low noise, medium noise, high noise.
     """
     sample_prior = False
-    set_starting_model = False
+    set_starting_model = True
     rotate = False
     n_layers = 2
-    # noise_dist = "normal"
-    noise_dist = "asym-laplace"
+    noise_dist = "normal"
+    # noise_dist = "asym-laplace"
     # inv_noise_dist = "normal"
     inv_noise_dist = "asym-laplace"
     # noise_percent = 0.05  # 0.02 # 0.05 # 0.1
@@ -195,13 +194,19 @@ if __name__ == "__main__":
 
     # run_inversion()
 
-    # data: AL, model: normal
-    # file_name = "1776911082" # first run, 3 layers, not converged
-    # file_name = "1777403132" # 2 layers, starting_model=False
-    # file_name = "1777403352" # 2 layers, starting_model=True
+    # ---- with new model, 2 layers, starting_model=False
+    # data: normal, model: normal
+    # file_name = "1777479628"
 
+    # data: AL, model: normal
+    # file_name = "1777479794"
+
+    # ---- with new model, 2 layers, starting_model=True
+    # run with edited lambda scaling
     # data: AL, model: AL
-    # file_name = "1777403603" # 2 layers, starting_model=True
-    # file_name = "1777403720" # 2 layers, starting_model=False
+    # file_name = "1777648148"
+
+    # data: normal, model: AL
+    file_name = "1777648228"
 
     plot_inversion(file_name)

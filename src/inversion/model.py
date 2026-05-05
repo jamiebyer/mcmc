@@ -222,7 +222,9 @@ class Model:
 
         if valid_params:
             # calculate likelihood with predicted data
-            logL_new = Model.get_likelihood(data, data_pred_new, self.noise_dist, self.noise_params)
+            logL_new = Model.get_likelihood(
+                data, data_pred_new, self.noise_dist, self.noise_params
+            )
             # check acceptance criteria
             acc = self.acceptance_criteria(logL_new, T=T)
             if acc:
@@ -414,10 +416,20 @@ class Model:
             logL = -np.sum((residuals**2) / (2 * sigma_data**2))
         elif noise_dist == "asym-laplace":
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-            lambd = sigma_data*lambd
+            lambd = (1 / (3.5 * sigma_data)) * lambd
+            lambd = sigma_data * lambd
             s = np.sign(residuals)
-            logL = -np.sum(np.log(lambd/(kappa + (1/kappa))) - (residuals*lambd*s*(kappa**s)))
-
+            logL = np.sum(
+                np.log(lambd / (kappa + (1 / kappa)))
+                - (residuals * lambd * s * (kappa**s))
+            )
+            """
+            logL = 0
+            for i, r in enumerate(residuals):
+                l = sigma_data[i]*lambd
+                s = np.sign(r)
+                logL += np.sum(np.log(l/(kappa + (1/kappa))) - (r*l*s*(kappa**s)))
+            """
         return logL
 
     def acceptance_criteria(self, logL_new, T):

@@ -116,7 +116,7 @@ class SyntheticData(Data):
             mu = 0
             lambd = (1 / (3.5 * sigma_data)) * lambd
 
-            x = np.linspace(-100, 100, 100000)
+            x = np.linspace(-50, 50, 100000)
 
             noise = []
             for ind in range(len(data_true)):
