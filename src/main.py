@@ -192,7 +192,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
     # ---- with new model, 2 layers, starting_model=False
     # data: normal, model: normal
@@ -209,4 +209,4 @@ if __name__ == "__main__":
     # data: normal, model: AL
     file_name = "1777648228"
 
-    plot_inversion(file_name)
+    # plot_inversion(file_name)

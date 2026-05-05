@@ -409,7 +409,7 @@ class Model:
         :param velocity_model:
         :param data:
         """
-        residuals = data.data_obs - data_pred
+        residuals = data_pred - data.data_obs
 
         sigma_data = noise_params["noise_percent"]
         if noise_dist == "normal":
