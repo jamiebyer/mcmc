@@ -327,7 +327,9 @@ class Inversion:
                 data_pred = self.model_params.forward_model(
                     self.data.periods, test_params
                 )
-                logL_new = Model.get_likelihood(self.data, data_pred, model.noise_dist, model.noise_params)
+                logL_new = Model.get_likelihood(
+                    self.data, data_pred, model.noise_dist, model.noise_params
+                )
                 valid_params = True
             else:
                 # initialize model params
@@ -422,6 +424,7 @@ class Inversion:
             # saving the chain model with beta of 1
             if chain.beta == 1:
                 # update storage dataset with new param values
+                model_params = chain.model_params.model_params.copy()
                 self.ds_storage["data_vars"]["model_params"]["data"][
                     :, n_save
                 ] = chain.model_params.model_params.copy()

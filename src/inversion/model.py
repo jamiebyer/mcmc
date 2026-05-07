@@ -188,7 +188,7 @@ class Model:
         acc, valid_params = False, True
         if sample_prior:
             # for testing and sampling the prior, return perfect likelihood and empty data.
-            logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
+            logL_new, data_pred_new = 1, np.empty(data.n_data)
         else:
             # validate params
             if not self.validate_bounds(

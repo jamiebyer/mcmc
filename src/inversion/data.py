@@ -190,7 +190,7 @@ class SyntheticData(Data):
             norm_q_lower,
             norm_q_higher,
         ) = self.generate_noise_dist(noise_dist, noise_params, periods, data_true)
-
+        """
         self.plot_simulated_data_hist2d(
             periods,
             data_true,
@@ -202,7 +202,7 @@ class SyntheticData(Data):
             norm_q_lower,
             norm_q_higher,
         )
-
+        """
         return data_true, data_obs, sigma_data, model_params
 
     def generate_noise_dist(self, noise_dist, noise_params, periods, data_true):

@@ -74,7 +74,7 @@ def setup_test_model(n_layers):
 
 
 def basic_inversion(
-    n_layers, noise_dist, noise_params, inv_noise_dist, sample_prior, set_starting_model
+    n_layers, noise_dist, noise_params, inv_noise_dist, set_starting_model
 ):
     """
     real noise added to synthetic data (percentage)
@@ -131,14 +131,14 @@ def run_inversion():
     - Run with 1 layer, 2 layers.
     - Run with low noise, medium noise, high noise.
     """
-    sample_prior = False
+    sample_prior = True
     set_starting_model = False
     rotate = False
     n_layers = 2
-    # noise_dist = "normal"
-    noise_dist = "asym-laplace"
-    # inv_noise_dist = "normal"
-    inv_noise_dist = "asym-laplace"
+    noise_dist = "normal"
+    # noise_dist = "asym-laplace"
+    inv_noise_dist = "normal"
+    # inv_noise_dist = "asym-laplace"
     # noise_percent = 0.05  # 0.02 # 0.05 # 0.1
     noise_percent = 0.10
     # lambd, kappa = 5.6, 0.92
@@ -149,12 +149,12 @@ def run_inversion():
         noise_dist=noise_dist,
         noise_params={"noise_percent": noise_percent, "lambd": lambd, "kappa": kappa},
         inv_noise_dist=inv_noise_dist,
-        sample_prior=sample_prior,
         set_starting_model=set_starting_model,
     )
     inversion.random_walk(
         model_params,
         proposal_distribution="cauchy",
+        sample_prior=sample_prior,
         rotate_params=rotate,
     )
 
