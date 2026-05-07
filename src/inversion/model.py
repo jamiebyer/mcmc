@@ -188,7 +188,7 @@ class Model:
         acc, valid_params = False, True
         if sample_prior:
             # for testing and sampling the prior, return perfect likelihood and empty data.
-            logL_new, data_pred_new, test_model_params = 1, np.empty(data.n_data)
+            logL_new, data_pred_new = 1, np.empty(data.n_data)
         else:
             # validate params
             if not self.validate_bounds(
@@ -406,30 +406,28 @@ class Model:
     @staticmethod
     def get_likelihood(data, data_pred, noise_dist, noise_params):
         """
-        :param velocity_model:
         :param data:
+        :param data_pred:
+        :param noise_dist:
+        :param noise_params:
         """
         residuals = data_pred - data.data_obs
 
-        sigma_data = noise_params["noise_percent"]
         if noise_dist == "normal":
+            sigma_data = noise_params["std"]
             logL = -np.sum((residuals**2) / (2 * sigma_data**2))
+
         elif noise_dist == "asym-laplace":
+            lambd_scale = noise_params["lambd_scale"]
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-            lambd = (1 / (3.5 * sigma_data)) * lambd
-            lambd = sigma_data * lambd
+
+            lambd = (1 / lambd_scale) * lambd
             s = np.sign(residuals)
+
             logL = np.sum(
                 np.log(lambd / (kappa + (1 / kappa)))
                 - (residuals * lambd * s * (kappa**s))
             )
-            """
-            logL = 0
-            for i, r in enumerate(residuals):
-                l = sigma_data[i]*lambd
-                s = np.sign(r)
-                logL += np.sum(np.log(l/(kappa + (1/kappa))) - (r*l*s*(kappa**s)))
-            """
         return logL
 
     def acceptance_criteria(self, logL_new, T):

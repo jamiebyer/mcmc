@@ -45,7 +45,7 @@ def setup_test_model(n_layers):
     # set up data and inversion params
     if n_layers == 1:
         bounds = {
-            "depth": np.array([0.001, 0.3]),  # km
+            "depth": np.array([0.001, 0.15]),  # km
             # "vel_s": [0.1, 1.8],  # km/s
             "vel_s": np.array([[0.100, 0.750], [0.500, 2.000]]),  # km/s
         }
@@ -57,7 +57,7 @@ def setup_test_model(n_layers):
         }
     elif n_layers == 3:
         bounds = {
-            "depth": np.array([0.001, 0.3]),  # km
+            "depth": np.array([0.001, 0.15]),  # km
             "vel_s": np.array([0.100, 2.000]),  # km/s
         }
 
@@ -74,7 +74,12 @@ def setup_test_model(n_layers):
 
 
 def basic_inversion(
-    n_layers, noise_dist, noise_params, inv_noise_dist, sample_prior, set_starting_model
+    n_layers,
+    noise_dist,
+    noise_params,
+    inv_noise_dist,
+    inv_noise_params,
+    set_starting_model,
 ):
     """
     real noise added to synthetic data (percentage)
@@ -83,7 +88,7 @@ def basic_inversion(
 
     if n_layers == 1:
         # one layer
-        depth = [0.02]
+        depth = [0.05]
         vel_s = [0.4, 1.0]
     elif n_layers == 2:
         # two layers
@@ -108,11 +113,16 @@ def basic_inversion(
         "set_starting_model": set_starting_model,
     }
 
-    mod_noise_params = noise_params.copy()
-    mod_noise_params["noise_percent"] = (
-        mod_noise_params["noise_percent"] * data.data_obs
-    )
-    model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": noise_params}
+    # for frequency dependent noise model, scale using observed data
+    if inv_noise_params["frequency_scaling"]:
+        if inv_noise_dist == "normal":
+            inv_noise_params["std"] = inv_noise_params["std_percent"] * data.data_obs
+        elif inv_noise_dist == "asym-laplace":
+            inv_noise_params["lambd_scale"] = (
+                inv_noise_params["lambd_scale_percent"] * data.data_obs
+            )
+
+    model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": inv_noise_params}
 
     # run inversion
     inversion = Inversion(
@@ -134,32 +144,56 @@ def run_inversion():
     sample_prior = False
     set_starting_model = True
     rotate = False
-    n_layers = 2
-    noise_dist = "normal"
-    # noise_dist = "asym-laplace"
+
+    n_layers = 1
+    # noise_dist = "normal"
+    noise_dist = "asym-laplace"
     # inv_noise_dist = "normal"
     inv_noise_dist = "asym-laplace"
-    # noise_percent = 0.05  # 0.02 # 0.05 # 0.1
-    noise_percent = 0.10
-    # lambd, kappa = 5.6, 0.92
-    lambd, kappa = 5.6, 0.72
+    frequency_scaling = False
 
+    noise_params = {"frequency_scaling": frequency_scaling}
+    if noise_dist == "normal":
+        std = 0.100  # 0.050 # 0.150 # km/s
+        std_percent = 0.10
+
+        if frequency_scaling:
+            # for normal errors with frequency dependence,
+            # use the percent of the data as the standard deviation
+            noise_params["std_percent"] = std_percent
+        else:
+            # for IID errors, the value for normal standard deviation
+            noise_params["std"] = std
+
+    elif noise_dist == "asym-laplace":
+        lambd_scale = 0.100  # 0.050 # 0.150 # km/s
+        lambd_scale_percent = 0.10
+        lambd, kappa = 5.6, 0.72
+
+        noise_params["lambd"] = lambd
+        noise_params["kappa"] = kappa
+        if frequency_scaling:
+            noise_params["lambd_scale_percent"] = lambd_scale_percent
+        else:
+            noise_params["lambd_scale"] = lambd_scale
+
+    inv_noise_params = noise_params.copy()
+
+    # currently set up to use same noise params for real noise and for model noise
     inversion, model_params = basic_inversion(
         n_layers=n_layers,
         noise_dist=noise_dist,
-        noise_params={"noise_percent": noise_percent, "lambd": lambd, "kappa": kappa},
+        noise_params=noise_params,
         inv_noise_dist=inv_noise_dist,
-        sample_prior=sample_prior,
+        inv_noise_params=inv_noise_params,
         set_starting_model=set_starting_model,
     )
     inversion.random_walk(
         model_params,
         proposal_distribution="cauchy",
+        sample_prior=sample_prior,
         rotate_params=rotate,
     )
-
-
-#####
 
 
 def plot_inversion(file_name):
@@ -171,19 +205,6 @@ def plot_inversion(file_name):
 
     plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
 
-    # save_inversion_info(input_ds, results_ds, out_filename=file_name)
-    # plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=file_name)
-    # model_params_timeseries(input_ds, results_ds, save=True, out_filename=file_name)
-    # model_params_autocorrelation(
-    #     input_ds, results_ds, save=False, out_filename=file_name
-    # )
-    # model_params_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    # resulting_model_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_likelihood(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_vs30(input_ds, results_ds, save=True, out_filename=file_name)
-    # plot_surface_waves(input_ds, results_ds, save=True, out_filename=file_name)
-
 
 if __name__ == "__main__":
     """
@@ -194,19 +215,10 @@ if __name__ == "__main__":
 
     run_inversion()
 
-    # ---- with new model, 2 layers, starting_model=False
-    # data: normal, model: normal
-    # file_name = "1777479628"
+    # IID normal dist
+    # file_name = "1778183486"
 
-    # data: AL, model: normal
-    # file_name = "1777479794"
-
-    # ---- with new model, 2 layers, starting_model=True
-    # run with edited lambda scaling
-    # data: AL, model: AL
-    # file_name = "1777648148"
-
-    # data: normal, model: AL
-    file_name = "1777648228"
+    # IID AL dist
+    # file_name = "1778184831"
 
     # plot_inversion(file_name)

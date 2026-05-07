@@ -696,22 +696,26 @@ def plot_data_pred_histogram(
     ax[0, 1].axhline(y=0, c="black")
     residuals = (
         results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
-    )  # / input_ds.attrs["noise_percent"]
+    ) / input_ds.attrs["noise_percent"]
     ax[0, 1].scatter(freqs, residuals)
 
     ax[0, 1].set_xscale("log")
     ax[0, 1].set_xlabel("frequency (Hz)")
-    ax[0, 1].set_ylabel("residuals (data pred - data obs)")
+    ax[0, 1].set_ylabel(
+        "standardized residuals\n(data pred - data obs) / noise percent"
+    )
 
     # plot residuals as histogram
     ax[1, 1].hist(residuals, bins=16)
-    ax[1, 1].set_xlabel("residuals (data pred - data obs)")
+    ax[1, 1].set_xlabel(
+        "standardized residuals\n(data pred - data obs) / noise percent"
+    )
     ax[1, 1].set_ylabel("counts")
 
     # plot data predictions - data obs
     # print(results_ds["data_pred"].shape)
     # print(input_ds["data_obs"].shape)
-    diff = (results_ds["data_pred"] - input_ds["data_obs"]).values.flatten()
+    diff = (results_ds["data_pred"] - input_ds["data_true"]).values.flatten()
     diff_bins = np.linspace(np.min(diff), np.max(diff), n_bins)
 
     ax[1, 0].hist2d(hist_freqs, diff, bins=[freq_bins, diff_bins], cmin=1, norm="log")

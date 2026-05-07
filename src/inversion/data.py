@@ -33,8 +33,8 @@ class Data:
             "attrs": {"noise_dist": self.noise_dist},
         }
 
-        for k, v in self.noise_params.items():
-            data_dict["attrs"][k] = v
+        # for k, v in self.noise_params.items():
+        #     data_dict["attrs"][k] = v
 
         return data_dict
 
@@ -49,16 +49,24 @@ class SyntheticData(Data):
         self, periods, noise_dist, noise_params, model_params_obj, depth, vel_s
     ):
         """ """
-        data_true, data_obs, sigma_data, model_params = self.generate_observed_data(
+        data_true, data_obs, model_params = self.generate_observed_data(
             periods, noise_dist, noise_params, model_params_obj, depth, vel_s
         )
         self.data_true = data_true
         self.model_true = model_params
+        # for frequency dependent noise, scale using the true data
+        if noise_params["frequency_scaling"]:
+            if noise_dist == "normal":
+                noise_params["std"] = noise_params["std_percent"] * data_true
+            elif noise_dist == "asym-laplace":
+                noise_params["lambd_scale"] = (
+                    noise_params["lambd_scale_percent"] * data_true
+                )
 
         super().__init__(periods, data_obs, noise_dist, noise_params)
 
         # get true likelihood
-        noise_params["noise_percent"] = sigma_data
+        # need to get the likelihood using normal assumption and AL
         self.logL_true = Model.get_likelihood(self, data_true, noise_dist, noise_params)
 
     def generate_true_model(self, periods, noise, bounds, n_layers):
@@ -94,26 +102,6 @@ class SyntheticData(Data):
 
         return data_true, data_obs, sigma_data, model_true
 
-    def get_pdf(dist, x):
-        """ """
-        if dist == "normal":
-            norm_pdf = (1 / np.sqrt(2 * np.pi * sigma_data[ind] ** 2)) * np.exp(
-                -((x - mu) ** 2 / (2 * sigma_data[ind] ** 2))
-            )
-        elif dist == "asym-laplace":
-            s = np.sign(x - mu)
-            pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
-                -(x - mu) * lambd[ind] * s * kappa**s
-            )
-
-        # get cdf from pdf
-        # integrate distribution
-        # the cdf should go from 0 to 1
-        dx = x[1] - x[0]
-        cdf = np.cumsum(((pdf[:-1] + pdf[1:]) / 2) * dx)
-
-        return pdf, cdf
-
     def generate_observed_data(
         self, periods, noise_dist, noise_params, model_params_obj, depth, vel_s
     ):
@@ -128,42 +116,50 @@ class SyntheticData(Data):
         # a percent of the true data
         # or an exponential based on values from fitting the spread/percentiles of the field data
 
-        noise_percent = noise_params["noise_percent"]
         if noise_dist == "normal":
-            sigma_data = noise_percent * data_true
-            # sigma_data is a percentage, so multiply by true data
-            data_obs = data_true + sigma_data * np.random.randn(len(periods))
+            if noise_params["frequency_scaling"]:
+                # sigma_data is a percentage, so multiply by true data
+                noise_percent = noise_params["std_percent"]
+                std_data = noise_percent * data_true
+            else:
+                std_data = noise_params["std"]
+
+            data_obs = data_true + std_data * np.random.randn(len(periods))
 
         elif noise_dist == "asym-laplace":
             AL_q_5_list, AL_q_95_list = [], []
             norm_q_5_list, norm_q_95_list = [], []
 
+            # get lambda scaling from noise_params
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-            sigma_data = noise_percent * data_true
+            if noise_params["frequency_scaling"]:
+                scale_percent = noise_params["lambd_scale_percent"]
+                lambd_scaling = scale_percent * data_true
+            else:
+                scale_val = noise_params["lambd_scale"]
+                lambd_scaling = scale_val
 
             mu = 0
-            lambd = (1 / (3.5 * sigma_data)) * lambd
+            lambd = (1 / lambd_scaling) * lambd
 
+            # for each frequency, define the pdf for the error distribution
+            # integrate to get the cdf
+            # and pick noise using the cdf
             x = np.linspace(-50, 50, 100000)
-
             noise = []
             for ind in range(len(data_true)):
-                plt.clf()
+                if noise_params["frequency_scaling"]:
+                    l = lambd[ind]
+                else:
+                    l = lambd
 
                 s = np.sign(x - mu)
-                pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
-                    -(x - mu) * lambd[ind] * s * kappa**s
-                )
-
-                norm_pdf = (1 / np.sqrt(2 * np.pi * sigma_data[ind] ** 2)) * np.exp(
-                    -((x - mu) ** 2 / (2 * sigma_data[ind] ** 2))
-                )
+                pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
 
                 # integrate distribution
                 # the cdf should go from 0 to 1
                 dx = x[1] - x[0]
                 cdf = np.cumsum(((pdf[:-1] + pdf[1:]) / 2) * dx)
-                # norm_cdf = np.cumsum(((norm_pdf[:-1] + norm_pdf[1:]) / 2) * dx)
 
                 # q_5 = x[np.argmin(np.abs(cdf - 0.05))]
                 # q_95 = x[np.argmin(np.abs(cdf - 0.95))]
@@ -182,6 +178,7 @@ class SyntheticData(Data):
 
             data_obs = data_true + noise
 
+        """
         (
             freqs_2d,
             noise_2d,
@@ -202,8 +199,8 @@ class SyntheticData(Data):
             norm_q_lower,
             norm_q_higher,
         )
-
-        return data_true, data_obs, sigma_data, model_params
+        """
+        return data_true, data_obs, model_params
 
     def generate_noise_dist(self, noise_dist, noise_params, periods, data_true):
         # can give the noise frequency-dependent scaling using either

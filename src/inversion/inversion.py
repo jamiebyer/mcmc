@@ -327,7 +327,9 @@ class Inversion:
                 data_pred = self.model_params.forward_model(
                     self.data.periods, test_params
                 )
-                logL_new = Model.get_likelihood(self.data, data_pred, model.noise_dist, model.noise_params)
+                logL_new = Model.get_likelihood(
+                    self.data, data_pred, model.noise_dist, model.noise_params
+                )
                 valid_params = True
             else:
                 # initialize model params
