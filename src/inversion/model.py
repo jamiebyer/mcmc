@@ -116,7 +116,7 @@ class Model:
                 self.acceptance_rate["n_bounds_err"] += 1
             valid_params = False
 
-        if not sample_prior:
+        if valid_params and not sample_prior:
             if not self.model_params.validate_physics(
                 test_model_params
             ):  # validate physics
@@ -137,8 +137,11 @@ class Model:
                     else:
                         self.acceptance_rate["n_fm_err"] += 1
                     valid_params = False
+                    data_pred_new = np.empty(len(periods))
+        else:
+            data_pred_new = np.empty(len(periods))
 
-        return valid_params
+        return valid_params, data_pred_new
 
     def perturb_params(
         self,
@@ -222,13 +225,13 @@ class Model:
         test_model_params = self.model_params.sort_layers(test_model_params)
 
         # validate params
-        valid_params = self.validate_params(
+        valid_params, data_pred_new = self.validate_params(
             data.periods, test_model_params, ind, sample_prior
         )
 
         if sample_prior:
             # for testing and sampling the prior, return perfect likelihood and empty data.
-            logL_new, data_pred_new = 1, np.empty(data.n_data)
+            logL_new = 1
         else:
             # calculate likelihood with predicted data
             logL_new = Model.get_likelihood(
