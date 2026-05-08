@@ -327,7 +327,9 @@ class Inversion:
                 data_pred = self.model_params.forward_model(
                     self.data.periods, test_params
                 )
-                logL_new = Model.get_likelihood(self.data, data_pred, model.noise_dist, model.noise_params)
+                logL_new = Model.get_likelihood(
+                    self.data, data_pred, model.noise_dist, model.noise_params
+                )
                 valid_params = True
             else:
                 # initialize model params
@@ -378,8 +380,8 @@ class Inversion:
         for n_steps in range(self.n_mcmc):
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
+                chain_model = self.chains[ind]
                 for t in range(self.n_thin):
-                    chain_model = self.chains[ind]
                     # could do normalization and PC rotation out here... ***
                     chain_model.perturb_params(
                         self.data,
@@ -392,7 +394,7 @@ class Inversion:
                         rotate_params=rotate_params,
                     )
 
-                    delayed_results.append(chain_model)
+                delayed_results.append(chain_model)
 
             # synchronizing the separate chains
             self.chains = delayed_results
@@ -422,6 +424,7 @@ class Inversion:
             # saving the chain model with beta of 1
             if chain.beta == 1:
                 # update storage dataset with new param values
+                model_params = chain.model_params.model_params.copy()
                 self.ds_storage["data_vars"]["model_params"]["data"][
                     :, n_save
                 ] = chain.model_params.model_params.copy()

@@ -19,7 +19,6 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
-    # """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -51,13 +50,15 @@ def plot_results(
         plot_true_model=plot_true_model,
     )
     plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
+    plot_data_pred_frequencies(
+        input_ds, results_ds, save=True, out_filename=out_filename
+    )
     plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
     plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
     plot_timestep_covariance_matrix(
         input_ds, results_ds, save=True, out_filename=out_filename
     )
     plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
-    # """
     plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
@@ -124,12 +125,10 @@ def model_params_timeseries(
     """
     # use input_ds to interpret results_ds
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -209,12 +208,10 @@ def model_params_stepsize(
     # use input_ds to interpret results_ds
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -293,12 +290,10 @@ def model_params_autocorrelation(
     # use input_ds to interpret results_ds
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -340,12 +335,10 @@ def model_params_autocorrelation(
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     step = results_ds["step"]
@@ -410,12 +403,10 @@ def model_params_histogram(
     """
     # use input_ds to interpret results_ds
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -503,12 +494,10 @@ def resulting_model_histogram(
     """
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -650,22 +639,21 @@ def plot_data_pred_histogram(
     """
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     plt.clf()
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
-    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
+    fig, ax = plt.subplots(nrows=2, ncols=2, figsize=(18, 14))
     freqs = 1 / input_ds["period"]
 
     if "data_true" in input_ds:
-        ax[0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
-    print(input_ds.attrs)
-    yerr = input_ds.attrs["noise_percent"]
-    ax[0].errorbar(
+        ax[0, 0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
+
+    # yerr = input_ds.attrs["noise_percent"]
+    yerr = None
+    ax[0, 0].errorbar(
         freqs,
         input_ds["data_obs"],
         yerr,
@@ -677,7 +665,7 @@ def plot_data_pred_histogram(
 
     # get data prediction
     pred_ind = np.argmax(results_ds["logL"].values)
-    ax[0].scatter(
+    ax[0, 0].scatter(
         freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
     )
     # estimated error
@@ -688,29 +676,149 @@ def plot_data_pred_histogram(
     hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
     data_preds = results_ds["data_pred"].values.flatten()
 
-    ax[0].hist2d(hist_freqs, data_preds, bins=n_bins, cmin=1, norm="log")
+    # make log spaced freq bin sizes
+    freq_bins = np.logspace(
+        np.log10(np.min(freqs)), np.log10(np.max(freqs)), len(freqs) + 1
+    )
+    data_bins = np.linspace(np.min(data_preds), np.max(data_preds), n_bins)
+
+    ax[0, 0].hist2d(
+        hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1, norm="log"
+    )
     # fig.colorbar(im, ax=ax, label="count")
 
-    ax[0].set_xscale("log")
-    ax[0].set_xlabel("frequency (Hz)")
-    ax[0].set_ylabel("velocity (km/s)")
+    ax[0, 0].set_xscale("log")
+    ax[0, 0].set_xlabel("frequency (Hz)")
+    ax[0, 0].set_ylabel("velocity (km/s)")
 
-    ax[0].legend()
+    ax[0, 0].legend()
 
-    ax[1].axhline(y=0, c="black")
+    ax[0, 1].axhline(y=0, c="black")
     residuals = (
         results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
     ) / input_ds.attrs["noise_percent"]
-    ax[1].scatter(freqs, residuals)
+    ax[0, 1].scatter(freqs, residuals)
 
-    ax[1].set_xscale("log")
-    ax[1].set_xlabel("frequency (Hz)")
-    ax[1].set_title("residuals")
+    ax[0, 1].set_xscale("log")
+    ax[0, 1].set_xlabel("frequency (Hz)")
+    ax[0, 1].set_ylabel(
+        "standardized residuals\n(data pred - data obs) / noise percent"
+    )
+
+    # plot residuals as histogram
+    ax[1, 1].hist(residuals, bins=16)
+    ax[1, 1].set_xlabel(
+        "standardized residuals\n(data pred - data obs) / noise percent"
+    )
+    ax[1, 1].set_ylabel("counts")
+
+    # plot data predictions - data obs
+    # print(results_ds["data_pred"].shape)
+    # print(input_ds["data_obs"].shape)
+    diff = (results_ds["data_pred"] - input_ds["data_true"]).values.flatten()
+    diff_bins = np.linspace(np.min(diff), np.max(diff), n_bins)
+
+    ax[1, 0].hist2d(hist_freqs, diff, bins=[freq_bins, diff_bins], cmin=1, norm="log")
+    # fig.colorbar(im, ax=ax, label="count")
+
+    ax[1, 0].set_xscale("log")
+    ax[1, 0].set_xlabel("frequency (Hz)")
+    ax[1, 0].set_ylabel("data pred - data obs")
 
     if save:
         plt.savefig("figures/" + out_filename + "/data-" + out_filename + ".png")
     else:
         plt.show()
+
+
+def plot_data_pred_frequencies(
+    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+):
+    """
+    plot all data predictions as a histogram.
+    plot true data, observed data, and predicted data for the most probable model.
+    """
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+    pred_ind = np.argmax(results_ds["logL"].values)
+
+    noise_percent = input_ds.attrs["noise_percent"]
+    if input_ds.attrs["noise_dist"] == "asym-laplace":
+        lambd, kappa = input_ds.attrs["lambd"], input_ds.attrs["kappa"]
+        lambd = (1 / (3.5 * noise_percent)) * lambd
+
+    x = np.linspace(-50, 50, 100000)
+
+    if not os.path.exists("figures/" + out_filename + "/data-freqs"):
+        os.makedirs("figures/" + out_filename + "/data-freqs/")
+
+    for ind, p in enumerate(input_ds["period"].values):
+        mu = input_ds["data_obs"][ind].values
+
+        f = 1 / p
+        plt.clf()
+        fig, ax = plt.subplots(nrows=1, ncols=1, figsize=(12, 8))
+
+        # plot error distribution
+        if input_ds.attrs["noise_dist"] == "normal":
+            pdf = (1 / np.sqrt(2 * np.pi * noise_percent[ind] ** 2)) * np.exp(
+                -((x - mu) ** 2 / (2 * noise_percent[ind] ** 2))
+            )
+        elif input_ds.attrs["noise_dist"] == "asym-laplace":
+            s = np.sign(x - mu)
+            pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
+                -(x - mu) * lambd[ind] * s * kappa**s
+            )
+
+        # flatten data_pred, repeat period
+        # data_preds = results_ds["data_pred"].isel(period=ind).values
+        data_preds = results_ds["data_pred"].values[ind, :]
+
+        ax.hist(data_preds, bins=n_bins, density=True)
+        # fig.colorbar(im, ax=ax, label="count")
+
+        ax.plot(x, pdf, c="black")
+
+        # plot true data as a vertical line
+        if "data_true" in input_ds:
+            ax.axvline(input_ds["data_true"][ind], label="data_true", c="red")
+
+        ax.axvline(input_ds["data_obs"][ind], label="data_obs", c="orange")
+        ax.axvline(
+            results_ds["data_pred"].isel(step=pred_ind)[ind],
+            label="data_pred",
+            c="purple",
+        )
+
+        # ax[0].set_xscale("log")
+        # ax[0].set_xlabel("frequency (Hz)")
+        # ax[0].set_ylabel("velocity (km/s)")
+
+        # ax[0].legend()
+        if input_ds.attrs["noise_dist"] == "asym-laplace":
+            ax.set_title(
+                "freq: " + str(np.round(f, 2)) + "\nlambda: " + str(lambd[ind])
+            )
+        else:
+            ax.set_title("freq: " + str(np.round(f, 2)))
+        ax.set_xlim([0, 2])
+
+        if save:
+            plt.savefig(
+                "figures/"
+                + out_filename
+                + "/data-freqs/"
+                + str(np.round(f, 2))
+                + out_filename
+                + ".png"
+            )
+        else:
+            plt.show()
 
 
 def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
@@ -723,9 +831,7 @@ def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
 
     plt.clf()
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -830,13 +936,11 @@ def plot_timestep_covariance_matrix(input_ds, results_ds, save=False, out_filena
     """
 
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     plt.clf()
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     timesteps = [3000, 8000, 15000]
 
@@ -925,7 +1029,7 @@ def plot_vs30(
 ):
     """
     Vs30 = sum(d_i)/sum(t_i) = 30/sum(d_i/v_i)
-    
+
     Description	VS30 range (m/s)
     Hard rock	1500
     Rock	760-1500
@@ -935,12 +1039,10 @@ def plot_vs30(
     Site-specific analysis required	---
     """
     # n_burn = input_ds.attrs["n_burn"]
-    n_burn = int(len(results_ds["step"])/3)
+    n_burn = int(len(results_ds["step"]) / 3)
 
     # cut results by step
-    results_ds = results_ds.copy().isel(
-        step=slice(n_burn, len(results_ds["step"]))
-    )
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # use results_ds to get model params
     model_params = results_ds["model_params"].values
@@ -972,7 +1074,7 @@ def plot_vs30(
         # find first depth after 30 m
         depth_diff = depth_plotting[:, step_ind] - depth_boundary
         depth_diff[depth_diff < 0] = np.inf
-        
+
         # smallest positive number
         layer_ind = np.argmin(depth_diff)
         depth_plotting[layer_ind] = 30
@@ -982,15 +1084,12 @@ def plot_vs30(
             - depth_plotting[:layer_ind, step_ind]
         )
 
-        Vs30 = 30 / np.sum(
-            thickness[: layer_ind + 1] / vel_s[: layer_ind, step_ind]
-        )
+        Vs30 = 30 / np.sum(thickness[: layer_ind + 1] / vel_s[:layer_ind, step_ind])
         Vs30_list.append(Vs30)
 
     fig = plt.figure()
 
     plt.hist(np.array(Vs30_list) * 1000, bins=100, density=True)
-
 
     classes = [
         ["A", "Hard\nrock", 1500, 1550],
@@ -1004,7 +1103,6 @@ def plot_vs30(
         plt.axvline(vert, c="k", ls="-")
 
     # add percentage for classification
-
 
     plt.tight_layout()
 
