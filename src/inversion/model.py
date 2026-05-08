@@ -104,6 +104,42 @@ class Model:
 
         return model_params
 
+    def validate_params(self, periods, test_model_params, ind, sample_prior):
+        # validate params
+        valid_params = True
+        if not self.validate_bounds(
+            test_model_params
+        ):  # check parameters are in bounds
+            if self.individual_acceptance:
+                self.acceptance_rate["n_bounds_err"][ind] += 1
+            else:
+                self.acceptance_rate["n_bounds_err"] += 1
+            valid_params = False
+
+        if not sample_prior:
+            if not self.model_params.validate_physics(
+                test_model_params
+            ):  # validate physics
+                if self.individual_acceptance:
+                    self.acceptance_rate["n_physics_err"][ind] += 1
+                else:
+                    self.acceptance_rate["n_physics_err"] += 1
+                valid_params = False
+            else:
+                # run forward model to predict data for test_params
+                try:
+                    data_pred_new = self.model_params.forward_model(
+                        periods, test_model_params
+                    )
+                except (DispersionError, ZeroDivisionError, TypeError):
+                    if self.individual_acceptance:
+                        self.acceptance_rate["n_fm_err"][ind] += 1
+                    else:
+                        self.acceptance_rate["n_fm_err"] += 1
+                    valid_params = False
+
+        return valid_params
+
     def perturb_params(
         self,
         data,
@@ -185,46 +221,22 @@ class Model:
         # sort layers
         test_model_params = self.model_params.sort_layers(test_model_params)
 
-        acc, valid_params = False, True
+        # validate params
+        valid_params = self.validate_params(
+            data.periods, test_model_params, ind, sample_prior
+        )
+
         if sample_prior:
             # for testing and sampling the prior, return perfect likelihood and empty data.
             logL_new, data_pred_new = 1, np.empty(data.n_data)
         else:
-            # validate params
-            if not self.validate_bounds(
-                test_model_params
-            ):  # check parameters are in bounds
-                if self.individual_acceptance:
-                    self.acceptance_rate["n_bounds_err"][ind] += 1
-                else:
-                    self.acceptance_rate["n_bounds_err"] += 1
-                valid_params = False
-            elif not self.model_params.validate_physics(
-                test_model_params
-            ):  # validate physics
-                if self.individual_acceptance:
-                    self.acceptance_rate["n_physics_err"][ind] += 1
-                else:
-                    self.acceptance_rate["n_physics_err"] += 1
-                valid_params = False
-            else:
-                # run forward model to predict data for test_params
-                try:
-                    data_pred_new = self.model_params.forward_model(
-                        data.periods, test_model_params
-                    )
-                except (DispersionError, ZeroDivisionError, TypeError):
-                    if self.individual_acceptance:
-                        self.acceptance_rate["n_fm_err"][ind] += 1
-                    else:
-                        self.acceptance_rate["n_fm_err"] += 1
-                    valid_params = False
-
-        if valid_params:
             # calculate likelihood with predicted data
             logL_new = Model.get_likelihood(
                 data, data_pred_new, self.noise_dist, self.noise_params
             )
+
+        acc = False
+        if valid_params:
             # check acceptance criteria
             acc = self.acceptance_criteria(logL_new, T=T)
             if acc:
