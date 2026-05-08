@@ -116,7 +116,7 @@ class Model:
                 self.acceptance_rate["n_bounds_err"] += 1
             valid_params = False
 
-        if not sample_prior:
+        if valid_params and not sample_prior:
             if not self.model_params.validate_physics(
                 test_model_params
             ):  # validate physics
@@ -137,6 +137,7 @@ class Model:
                     else:
                         self.acceptance_rate["n_fm_err"] += 1
                     valid_params = False
+                    data_pred_new = np.empty(len(periods))
         else:
             data_pred_new = np.empty(len(periods))
 

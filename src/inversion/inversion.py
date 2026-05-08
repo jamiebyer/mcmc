@@ -380,8 +380,8 @@ class Inversion:
         for n_steps in range(self.n_mcmc):
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
+                chain_model = self.chains[ind]
                 for t in range(self.n_thin):
-                    chain_model = self.chains[ind]
                     # could do normalization and PC rotation out here... ***
                     chain_model.perturb_params(
                         self.data,
@@ -394,7 +394,7 @@ class Inversion:
                         rotate_params=rotate_params,
                     )
 
-                    delayed_results.append(chain_model)
+                delayed_results.append(chain_model)
 
             # synchronizing the separate chains
             self.chains = delayed_results
