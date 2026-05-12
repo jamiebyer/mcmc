@@ -178,75 +178,47 @@ class SyntheticData(Data):
 
             data_obs = data_true + noise
 
-        """
-        (
-            freqs_2d,
-            noise_2d,
-            AL_q_lower,
-            AL_q_higher,
-            norm_q_lower,
-            norm_q_higher,
-        ) = self.generate_noise_dist(noise_dist, noise_params, periods, data_true)
-        
-        self.plot_simulated_data_hist2d(
-            periods,
-            data_true,
-            data_obs,
-            freqs_2d,
-            noise_2d,
-            AL_q_lower,
-            AL_q_higher,
-            norm_q_lower,
-            norm_q_higher,
-        )
-        """
         return data_true, data_obs, model_params
 
-    def generate_noise_dist(self, noise_dist, noise_params, periods, data_true):
+    @staticmethod
+    def generate_noise_dist(noise_dist, noise_params, periods, data_true):
         # can give the noise frequency-dependent scaling using either
         # a percent of the true data
         # or an exponential based on values from fitting the spread/percentiles of the field data
-
-        noise_percent = noise_params["noise_percent"]
 
         # lower: 15.9, higher: 84.1, to have 68.2 range
         AL_q_lower_list, AL_q_higher_list = [], []
         norm_q_lower_list, norm_q_higher_list = [], []
 
         lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-        sigma_data = noise_percent * data_true
+        lambd_scale = noise_params["lambd_scale"]
 
         mu = 0
-        lambd = (1 / (3.5 * sigma_data)) * lambd
+        lambd = (1 / lambd_scale) * lambd
 
         x = np.linspace(-50, 50, 100000)
 
         freqs_2d, noise_2d = [], []
+        stds = []
         for ind in range(len(data_true)):
+            # the AL distribution is generated from the noise_params
             s = np.sign(x - mu)
             pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
                 -(x - mu) * lambd[ind] * s * kappa**s
-            )
-
-            norm_pdf = (1 / np.sqrt(2 * np.pi * sigma_data[ind] ** 2)) * np.exp(
-                -((x - mu) ** 2 / (2 * sigma_data[ind] ** 2))
             )
 
             # integrate distribution
             # the cdf should go from 0 to 1
             dx = x[1] - x[0]
             cdf = np.cumsum(((pdf[:-1] + pdf[1:]) / 2) * dx)
-            norm_cdf = np.cumsum(((norm_pdf[:-1] + norm_pdf[1:]) / 2) * dx)
 
-            q_lower = x[np.argmin(np.abs(cdf - 0.159))]
-            q_higher = x[np.argmin(np.abs(cdf - 0.841))]
+            q_low, q_high = 0.05, 0.95
+            # q_low, q_high = 0.159, 0.841
+
+            q_lower = x[np.argmin(np.abs(cdf - q_low))]
+            q_higher = x[np.argmin(np.abs(cdf - q_high))]
             AL_q_lower_list.append(q_lower)
             AL_q_higher_list.append(q_higher)
-
-            q_lower = x[np.argmin(np.abs(norm_cdf - 0.159))]
-            q_higher = x[np.argmin(np.abs(norm_cdf - 0.841))]
-            norm_q_lower_list.append(q_lower)
-            norm_q_higher_list.append(q_higher)
 
             picks = []
             for _ in range(10000):
@@ -259,12 +231,9 @@ class SyntheticData(Data):
 
                 picks.append(data_true[ind] + x_pick)
 
-            # normalize picks
-            # picks = np.array(picks)
-            # picks = (picks - picks.min()) / (picks.max() - picks.min())
+            stds.append(np.std(picks))
 
             freqs_2d += len(picks) * [1 / periods[ind]]
-            # noise_2d += list(picks)
             noise_2d += picks
 
         return (
@@ -274,16 +243,53 @@ class SyntheticData(Data):
             AL_q_higher_list,
             norm_q_lower_list,
             norm_q_higher_list,
+            stds,
         )
 
-    def plot_simulated_data_frequencies(self, data_true, data_obs, freqs_2d, noise_2d):
+    @staticmethod
+    def plot_simulated_data_frequencies(
+        periods,
+        data_true,
+        data_obs,
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+    ):
         # at each frequency
         # plot asymmetric laplacian
         # plot the normal distribution using the mode and the standard deviation of the data
-        pass
 
+        freq_bins = np.logspace(
+            np.log10(np.min(freqs_2d)), np.log10(np.max(freqs_2d)), len(periods) + 1
+        )
+        noise_bins = np.linspace(np.min(noise_2d), np.max(noise_2d), 150)
+        # plt.hist2d(freqs_2d, noise_2d, bins=[freq_bins, noise_bins])
+
+        # plot 2d histogram with normalizing each column/frequency
+        hist, xedges, yedges = np.histogram2d(
+            freqs_2d, noise_2d, bins=[freq_bins, noise_bins]
+        )
+        hist = hist.T
+        hist *= 1 / hist.sum(axis=0, keepdims=True)
+        hist[hist == 0] = np.nan
+        mesh = plt.pcolormesh(xedges, yedges, hist)
+
+        for ind, p in enumerate(periods):
+            plt.axvline(data_true[ind])
+            plt.axvline(data_obs[ind])
+
+            # plot hist of noise at this frequency
+            # plot AL distribution
+            # plot normal distribution
+            plt.plot()
+
+        plt.show()
+
+    @staticmethod
     def plot_simulated_data_hist2d(
-        self,
         periods,
         data_true,
         data_obs,

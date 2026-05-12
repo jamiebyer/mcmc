@@ -2,6 +2,7 @@ import cProfile
 from pstats import Stats, SortKey
 import os
 import numpy as np
+import pandas as pd
 
 from inversion.data import SyntheticData
 from inversion.model_params import DispersionCurveParams
@@ -17,8 +18,11 @@ np.random.seed(0)
 
 
 def setup_test_data(model_params, noise_dist, noise_params, depth, vel_s):
-    n_data = 100
-    periods = np.flip(1 / np.logspace(0, 1.1, n_data))
+    if "scale_freqs" in noise_params:
+        periods = np.flip(1 / noise_params["scale_freqs"])
+    else:
+        n_data = 100
+        periods = np.flip(1 / np.logspace(0, 1.1, n_data))
 
     # run synthetic data that uses inversion calculations for vel_p and density
     # and optionally, setting vel_p and density exactly.
@@ -86,6 +90,17 @@ def basic_inversion(
     assumed noise used in likelihood calculation (percentage)
     """
 
+    inversion_init_kwargs = {
+        "n_burn": 10000,
+        "n_chunk": 500,
+        "n_mcmc": 100000,
+        "n_cov_chunk": 500,
+        "n_thin": 10,
+        "n_chains": 1,
+        "beta_spacing_factor": 1.15,
+        "set_starting_model": set_starting_model,
+    }
+
     if n_layers == 1:
         # one layer
         depth = [0.05]
@@ -103,16 +118,32 @@ def basic_inversion(
     model_params = setup_test_model(n_layers)
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
-    inversion_init_kwargs = {
-        "n_burn": 10000,
-        "n_chunk": 500,
-        "n_mcmc": 100000,
-        "n_cov_chunk": 500,
-        "n_thin": 10,
-        "n_chains": 1,
-        "beta_spacing_factor": 1.15,
-        "set_starting_model": set_starting_model,
-    }
+    # plot synthetic data
+    (
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    ) = SyntheticData.generate_noise_dist(
+        noise_dist, noise_params, data.periods, data.data_true
+    )
+    SyntheticData.plot_simulated_data_hist2d(
+        data.periods,
+        data.data_true,
+        data.data_obs,
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+    )
+
+    # use synthetic noise dist to define normal model noise params
+    inv_noise_params["std"] = stds
 
     # for frequency dependent noise model, scale using observed data
     if inv_noise_params["frequency_scaling"]:
@@ -134,6 +165,10 @@ def basic_inversion(
     )
 
     return inversion, model_params
+
+
+def get_noise_params():
+    pass
 
 
 def run_inversion():
@@ -180,8 +215,12 @@ def run_inversion():
         else:
             # IID lambda scale
             noise_params["lambd_scale"] = lambd_scale
+            """
             # scaling by field data
-
+            df = pd.read_csv("./data/spread/WH04.csv")
+            noise_params["scale_freqs"] = df["freq"]
+            noise_params["lambd_scale"] = df["spread"]
+            """
     inv_noise_params = noise_params.copy()
 
     # currently set up to use same noise params for real noise and for model noise
