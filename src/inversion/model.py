@@ -429,7 +429,7 @@ class Model:
         residuals = data_pred - data.data_obs
 
         if noise_dist == "normal":
-            sigma_data = noise_params["std"]
+            sigma_data = np.array(noise_params["std"])
             logL = -np.sum((residuals**2) / (2 * sigma_data**2))
 
         elif noise_dist == "asym-laplace":

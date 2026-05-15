@@ -119,6 +119,7 @@ def basic_inversion(
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
     # plot synthetic data
+    # """
     (
         freqs_2d,
         noise_2d,
@@ -127,20 +128,27 @@ def basic_inversion(
         norm_q_lower,
         norm_q_higher,
         stds,
-    ) = SyntheticData.generate_noise_dist(
-        noise_dist, noise_params, data.periods, data.data_true
-    )
-    SyntheticData.plot_simulated_data_hist2d(
-        data.periods,
-        data.data_true,
-        data.data_obs,
+    ) = data.generate_noise_dist()
+    data.plot_simulated_data_hist2d(
         freqs_2d,
         noise_2d,
         AL_q_lower,
         AL_q_higher,
         norm_q_lower,
         norm_q_higher,
+        stds,
     )
+    data.plot_simulated_data_frequencies(
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    )
+    # """
+    raise ValueError
 
     # use synthetic noise dist to define normal model noise params
     inv_noise_params["std"] = stds
@@ -181,11 +189,11 @@ def run_inversion():
     set_starting_model = True
     rotate = False
 
-    n_layers = 2
-    noise_dist = "normal"
-    # noise_dist = "asym-laplace"
-    inv_noise_dist = "normal"
-    # inv_noise_dist = "asym-laplace"
+    n_layers = 1
+    # noise_dist = "normal"
+    noise_dist = "asym-laplace"
+    # inv_noise_dist = "normal"
+    inv_noise_dist = "asym-laplace"
     frequency_scaling = False
 
     noise_params = {"frequency_scaling": frequency_scaling}
@@ -218,8 +226,8 @@ def run_inversion():
             """
             # scaling by field data
             df = pd.read_csv("./data/spread/WH04.csv")
-            noise_params["scale_freqs"] = df["freq"]
-            noise_params["lambd_scale"] = df["spread"]
+            noise_params["scale_freqs"] = df["freq"].values
+            noise_params["lambd_scale"] = df["spread"].values
             """
     inv_noise_params = noise_params.copy()
 
@@ -277,7 +285,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
     # 1 layer
     # normal IID
@@ -294,7 +302,7 @@ if __name__ == "__main__":
 
     # sample prior
     # file_name = "1778206326"
-    file_name = "1778530848"
+    # file_name = "1778530848"
 
     # normal IID
     # std = 0.050, n_data=100
@@ -314,7 +322,7 @@ if __name__ == "__main__":
     # file_name = "1778278220"
     # file_name = "1778278312"
 
-    plot_inversion(file_name)
+    # plot_inversion(file_name)
 
     file_names = [
         "1778267910",

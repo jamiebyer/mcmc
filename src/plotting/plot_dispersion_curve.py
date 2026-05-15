@@ -6,6 +6,8 @@ import json
 import os
 
 from disba import PhaseDispersion
+from disba import PhaseDispersion
+from disba._exception import DispersionError
 
 
 def plot_results(
@@ -19,6 +21,9 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+    plot_data_pred_validate(input_ds, results_ds, save=True, out_filename=out_filename)
+
+    """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -60,6 +65,7 @@ def plot_results(
     # )
     # plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
     # plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
+    """
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -930,6 +936,172 @@ def plot_data_pred_frequencies(
             )
         else:
             plt.show()
+
+
+def plot_data_pred_validate(
+    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+):
+    """
+    plot all data predictions as a histogram.
+    plot true data, observed data, and predicted data for the most probable model.
+    """
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    plt.clf()
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+    fig, ax = plt.subplots(nrows=1, ncols=2, figsize=(18, 8))
+    freqs = 1 / input_ds["period"]
+
+    if "data_true" in input_ds:
+        ax[0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
+        ax[1].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
+
+    # yerr = input_ds.attrs["noise_percent"]
+    yerr = None
+    ax[0].errorbar(
+        freqs,
+        input_ds["data_obs"],
+        yerr,
+        fmt="o",
+        zorder=3,
+        c="orange",
+        label="data_obs",
+    )
+
+    # get data prediction
+    pred_ind = np.argmax(results_ds["logL"].values)
+    ax[0].scatter(
+        freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
+    )
+    # estimated error
+    # *** depends if it's a percent error or not
+    # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
+
+    # flatten data_pred, repeat period
+    hist_freqs = np.repeat(freqs, results_ds["data_pred"].shape[1])
+    data_preds = results_ds["data_pred"].values.flatten()
+
+    # make log spaced freq bin sizes
+    freq_bins = np.logspace(
+        np.log10(np.min(freqs)), np.log10(np.max(freqs)), len(freqs) + 1
+    )
+    data_bins = np.linspace(np.min(data_preds), np.max(data_preds), n_bins)
+
+    ax[0].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
+    # fig.colorbar(im, ax=ax, label="count")
+
+    ax[0].set_ylim([0, 1.0])
+    ax[0].set_xscale("log")
+    ax[0].set_xlabel("frequency (Hz)")
+    ax[0].set_ylabel("velocity (km/s)")
+
+    ax[0].legend()
+
+    # functions needed for forward model
+    def get_vel_p(vel_s, vpvs_ratio):
+        vel_p = vel_s * vpvs_ratio
+        return vel_p
+
+    def get_density(vel_p):
+        # using Garner's relation
+        density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
+        return density
+
+    def forward_model(periods, model_params, depth_inds, vel_s_inds):
+        """
+        get phase dispersion curve for current shear velocities and layer thicknesses.
+
+        :param periods:
+        :param velocity model: velocity model for disba has the format
+            [thickness (km), vel_p (km/s), vel_s (km/s), density (g/cm3)]
+        :param model_params: model params to use to get phase dispersion
+        """
+        depth = model_params[depth_inds]
+        vel_s = model_params[vel_s_inds]
+        # get thicknesses
+        # *** probably a faster way to do this
+        depth = np.concatenate(([0], depth))
+        thickness = np.concatenate((depth[1:] - depth[:-1], [0]))
+
+        # assemble params into velocity model
+        vel_p = get_vel_p(vel_s)
+        density = get_density(vel_p)
+        # avoid converting thickness back and forth from list
+        velocity_model = np.array([thickness, vel_p, vel_s, density])
+
+        # phase dispersion object
+        pd = PhaseDispersion(*velocity_model)
+
+        # try calculating phase_velocity from given params.
+        try:
+            pd_rayleigh = pd(periods, mode=0, wave="rayleigh")
+            phase_velocity = pd_rayleigh.velocity
+            return phase_velocity
+        except (DispersionError, ZeroDivisionError) as e:
+            raise e
+
+    # plot data pred from model params
+    periods = input_ds["period"]
+    # read in model params
+    model_params = results_ds["model_params"].values
+    depth_inds = input_ds["depth_inds"]
+    vel_s_inds = input_ds["vel_s_inds"]
+
+    print(model_params.shape)
+    data_preds = []
+    for i in len(model_params):
+        data_pred = forward_model(periods, model_params[i], depth_inds, vel_s_inds)
+        data_preds.append(data_pred)
+
+    ax[1].errorbar(
+        freqs,
+        input_ds["data_obs"],
+        yerr,
+        fmt="o",
+        zorder=3,
+        c="orange",
+        label="data_obs",
+    )
+
+    # get data prediction
+    pred_ind = np.argmax(results_ds["logL"].values)
+    ax[1].scatter(
+        freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
+    )
+    # estimated error
+    # *** depends if it's a percent error or not
+    # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
+
+    # flatten data_pred, repeat period
+    hist_freqs = np.repeat(freqs, data_preds.shape[1])
+    data_preds = data_preds.flatten()
+
+    # make log spaced freq bin sizes
+    freq_bins = np.logspace(
+        np.log10(np.min(freqs)), np.log10(np.max(freqs)), len(freqs) + 1
+    )
+    data_bins = np.linspace(np.min(data_preds), np.max(data_preds), n_bins)
+
+    ax[1].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
+    # fig.colorbar(im, ax=ax, label="count")
+
+    ax[1].set_ylim([0, 1.0])
+    ax[1].set_xscale("log")
+    ax[1].set_xlabel("frequency (Hz)")
+    ax[1].set_ylabel("velocity (km/s)")
+
+    ax[1].legend()
+
+    if save:
+        plt.savefig(
+            "figures/" + out_filename + "/data-validate-" + out_filename + ".png"
+        )
+    else:
+        plt.show()
 
 
 def plot_covariance_matrix(input_ds, results_ds, save=False, out_filename=""):
