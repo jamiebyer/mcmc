@@ -148,7 +148,7 @@ def basic_inversion(
         stds,
     )
     # """
-    raise ValueError
+    # raise ValueError
 
     # use synthetic noise dist to define normal model noise params
     inv_noise_params["std"] = stds
@@ -310,30 +310,4 @@ if __name__ == "__main__":
     # std = 0.010, n_data=100
     # file_name = "1778284207"
 
-    # n_data=50, 10 data realizations
-    # file_name = "1778267910"
-    # file_name = "1778268563"
-    # file_name = "1778274790"
-    # file_name = "1778275236"
-    # file_name = "1778275585"
-    # file_name = "1778275696"
-    # file_name = "1778276023"
-    # file_name = "1778277765"
-    # file_name = "1778278220"
-    # file_name = "1778278312"
-
     # plot_inversion(file_name)
-
-    file_names = [
-        "1778267910",
-        "1778268563",
-        "1778274790",
-        "1778275236",
-        "1778275585",
-        "1778275696",
-        "1778276023",
-        "1778277765",
-        "1778278220",
-        "1778278312",
-    ]
-    # plot_compare(file_names)
