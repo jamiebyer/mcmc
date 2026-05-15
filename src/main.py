@@ -146,10 +146,10 @@ def run_inversion():
     rotate = False
 
     n_layers = 1
-    # noise_dist = "normal"
-    noise_dist = "asym-laplace"
-    # inv_noise_dist = "normal"
-    inv_noise_dist = "asym-laplace"
+    noise_dist = "normal"
+    # noise_dist = "asym-laplace"
+    inv_noise_dist = "normal"
+    # inv_noise_dist = "asym-laplace"
     frequency_scaling = False
 
     noise_params = {"frequency_scaling": frequency_scaling}
