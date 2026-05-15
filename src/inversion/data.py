@@ -148,10 +148,10 @@ class SyntheticData(Data):
             x = np.linspace(-50, 50, 100000)
             noise = []
             for ind in range(len(data_true)):
-                if noise_params["frequency_scaling"]:
-                    l = lambd[ind]
-                else:
+                if isinstance(lambd, float):
                     l = lambd
+                else:
+                    l = lambd[ind]
 
                 s = np.sign(x - mu)
                 pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
@@ -201,11 +201,14 @@ class SyntheticData(Data):
         freqs_2d, noise_2d = [], []
         stds = []
         for ind in range(len(data_true)):
+            if isinstance(lambd, float):
+                l = lambd
+            else:
+                l = lambd[ind]
+
             # the AL distribution is generated from the noise_params
             s = np.sign(x - mu)
-            pdf = (lambd[ind] / (kappa + 1 / kappa)) * np.exp(
-                -(x - mu) * lambd[ind] * s * kappa**s
-            )
+            pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
 
             # integrate distribution
             # the cdf should go from 0 to 1
@@ -235,6 +238,8 @@ class SyntheticData(Data):
 
             freqs_2d += len(picks) * [1 / periods[ind]]
             noise_2d += picks
+
+        stds = np.array(stds)
 
         return (
             freqs_2d,

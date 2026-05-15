@@ -55,7 +55,8 @@ def setup_test_model(n_layers):
         }
     elif n_layers == 2:
         bounds = {
-            "depth": np.array([0.001, 0.15]),  # km
+            # "depth": np.array([0.001, 0.15]),  # km
+            "depth": np.array([[0.001, 0.075], [0.075, 0.15]]),  # km
             # "vel_s": [0.1, 1.8],  # km/s
             "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
         }
@@ -119,31 +120,35 @@ def basic_inversion(
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
     # plot synthetic data
-    (
-        freqs_2d,
-        noise_2d,
-        AL_q_lower,
-        AL_q_higher,
-        norm_q_lower,
-        norm_q_higher,
-        stds,
-    ) = SyntheticData.generate_noise_dist(
-        noise_dist, noise_params, data.periods, data.data_true
-    )
-    SyntheticData.plot_simulated_data_hist2d(
-        data.periods,
-        data.data_true,
-        data.data_obs,
-        freqs_2d,
-        noise_2d,
-        AL_q_lower,
-        AL_q_higher,
-        norm_q_lower,
-        norm_q_higher,
-    )
 
     # use synthetic noise dist to define normal model noise params
-    inv_noise_params["std"] = stds
+    if noise_dist == "asym-laplace" and inv_noise_dist == "normal":
+        (
+            freqs_2d,
+            noise_2d,
+            AL_q_lower,
+            AL_q_higher,
+            norm_q_lower,
+            norm_q_higher,
+            stds,
+        ) = SyntheticData.generate_noise_dist(
+            noise_dist, noise_params, data.periods, data.data_true
+        )
+        inv_noise_params["std"] = stds
+
+        """
+        SyntheticData.plot_simulated_data_hist2d(
+            data.periods,
+            data.data_true,
+            data.data_obs,
+            freqs_2d,
+            noise_2d,
+            AL_q_lower,
+            AL_q_higher,
+            norm_q_lower,
+            norm_q_higher,
+        )
+        """
 
     # for frequency dependent noise model, scale using observed data
     if inv_noise_params["frequency_scaling"]:
@@ -181,16 +186,16 @@ def run_inversion():
     set_starting_model = True
     rotate = False
 
-    n_layers = 2
-    noise_dist = "normal"
-    # noise_dist = "asym-laplace"
-    inv_noise_dist = "normal"
-    # inv_noise_dist = "asym-laplace"
+    n_layers = 1
+    # noise_dist = "normal"
+    noise_dist = "asym-laplace"
+    # inv_noise_dist = "normal"
+    inv_noise_dist = "asym-laplace"
     frequency_scaling = False
 
     noise_params = {"frequency_scaling": frequency_scaling}
     if noise_dist == "normal":
-        std = 0.010  # km/s
+        std = 0.025  # km/s
         std_percent = 0.10
 
         if frequency_scaling:
@@ -204,8 +209,8 @@ def run_inversion():
     elif noise_dist == "asym-laplace":
         lambd_scale = 0.200  # 0.050 # 0.150 # km/s
         lambd_scale_percent = 0.10
-        # lambd, kappa = 5.6, 0.72
-        lambd, kappa = 5.6, 1.0
+        lambd, kappa = 5.6, 0.72
+        # lambd, kappa = 5.6, 1.0
 
         noise_params["lambd"] = lambd
         noise_params["kappa"] = kappa
@@ -218,8 +223,8 @@ def run_inversion():
             """
             # scaling by field data
             df = pd.read_csv("./data/spread/WH04.csv")
-            noise_params["scale_freqs"] = df["freq"]
-            noise_params["lambd_scale"] = df["spread"]
+            noise_params["scale_freqs"] = df["freq"].values
+            noise_params["lambd_scale"] = df["spread"].values
             """
     inv_noise_params = noise_params.copy()
 
@@ -294,7 +299,7 @@ if __name__ == "__main__":
 
     # sample prior
     # file_name = "1778206326"
-    file_name = "1778530848"
+    # file_name = "1778530848"
 
     # normal IID
     # std = 0.050, n_data=100
@@ -302,30 +307,38 @@ if __name__ == "__main__":
     # std = 0.010, n_data=100
     # file_name = "1778284207"
 
-    # n_data=50, 10 data realizations
-    # file_name = "1778267910"
-    # file_name = "1778268563"
-    # file_name = "1778274790"
-    # file_name = "1778275236"
-    # file_name = "1778275585"
-    # file_name = "1778275696"
-    # file_name = "1778276023"
-    # file_name = "1778277765"
-    # file_name = "1778278220"
-    # file_name = "1778278312"
+    ###
+    # noise: normal (0.010), inv_noise: normal (0.010)
+    # file_name = "1778607344"
+
+    # noise: AL, inv_noise: normal #IID scaling
+    # file_name = "1778608678"
+
+    # noise: AL, inv_noise: normal # field data scaling
+    # file_name = "1778609260"
+
+    # run with layer sorting, constrained prior
+    # file_name = "1778700782"
+    # run without layer sorting, constrained prior
+    # file_name = "1778701123"
+
+    # 1 layer
+    # noise: normal (0.025), inv_noise: normal #IID scaling
+    # file_name = "1778807879"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=1.0
+    # file_name = "1778808384"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
+    # file_name = "1778808474"
+    # noise: AL, inv_noise: normal #IID scaling, kappa=1.0
+    # file_name = "1778808734"
+    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
+    # file_name = "1778809012"
+
+    # flip residuals...
+    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
+    # file_name = "1778866691"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
+    # file_name = "1778869269"
+    file_name = "1778870140"
 
     plot_inversion(file_name)
-
-    file_names = [
-        "1778267910",
-        "1778268563",
-        "1778274790",
-        "1778275236",
-        "1778275585",
-        "1778275696",
-        "1778276023",
-        "1778277765",
-        "1778278220",
-        "1778278312",
-    ]
-    # plot_compare(file_names)

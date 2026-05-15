@@ -426,7 +426,7 @@ class Model:
         :param noise_dist:
         :param noise_params:
         """
-        residuals = data_pred - data.data_obs
+        residuals = data.data_obs - data_pred
 
         if noise_dist == "normal":
             sigma_data = noise_params["std"]

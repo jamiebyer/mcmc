@@ -97,7 +97,7 @@ class DispersionCurveParams(ModelParams):
         return vel_p
 
     def get_density(self, vel_p):
-        # using Garner's relation
+        # using Gardner's relation
         density = (1741 * np.sign(vel_p) * abs(vel_p) ** (1 / 4)) / 1000
         return density
 
