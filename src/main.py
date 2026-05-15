@@ -120,6 +120,36 @@ def basic_inversion(
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
     # plot synthetic data
+    """
+    (
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    ) = data.generate_noise_dist()
+    data.plot_simulated_data_hist2d(
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    )
+    data.plot_simulated_data_frequencies(
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    )
+    """
+    # raise ValueError
 
     # use synthetic noise dist to define normal model noise params
     if noise_dist == "asym-laplace" and inv_noise_dist == "normal":
@@ -282,7 +312,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
     # 1 layer
     # normal IID
