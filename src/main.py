@@ -2,6 +2,7 @@ import cProfile
 from pstats import Stats, SortKey
 import os
 import numpy as np
+import pandas as pd
 
 from inversion.data import SyntheticData
 from inversion.model_params import DispersionCurveParams
@@ -17,8 +18,11 @@ np.random.seed(0)
 
 
 def setup_test_data(model_params, noise_dist, noise_params, depth, vel_s):
-    n_data = 50
-    periods = np.flip(1 / np.logspace(0, 1.1, n_data))
+    if "scale_freqs" in noise_params:
+        periods = np.flip(1 / noise_params["scale_freqs"])
+    else:
+        n_data = 100
+        periods = np.flip(1 / np.logspace(0, 1.1, n_data))
 
     # run synthetic data that uses inversion calculations for vel_p and density
     # and optionally, setting vel_p and density exactly.
@@ -86,13 +90,25 @@ def basic_inversion(
     assumed noise used in likelihood calculation (percentage)
     """
 
+    inversion_init_kwargs = {
+        "n_burn": 10000,
+        "n_chunk": 500,
+        "n_mcmc": 100000,
+        "n_cov_chunk": 500,
+        "n_thin": 10,
+        "n_chains": 1,
+        "beta_spacing_factor": 1.15,
+        "set_starting_model": set_starting_model,
+    }
+
     if n_layers == 1:
         # one layer
         depth = [0.05]
         vel_s = [0.4, 1.0]
     elif n_layers == 2:
         # two layers
-        depth = [0.02, 0.08]
+        # depth = [0.02, 0.08]
+        depth = [0.05, 0.10]
         vel_s = [0.2, 0.6, 1.5]
     elif n_layers == 3:
         # three layers
@@ -102,16 +118,32 @@ def basic_inversion(
     model_params = setup_test_model(n_layers)
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
-    inversion_init_kwargs = {
-        "n_burn": 10000,
-        "n_chunk": 500,
-        "n_mcmc": 50000,
-        "n_cov_chunk": 500,
-        "n_thin": 10,
-        "n_chains": 1,
-        "beta_spacing_factor": 1.15,
-        "set_starting_model": set_starting_model,
-    }
+    # plot synthetic data
+    (
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+        stds,
+    ) = SyntheticData.generate_noise_dist(
+        noise_dist, noise_params, data.periods, data.data_true
+    )
+    SyntheticData.plot_simulated_data_hist2d(
+        data.periods,
+        data.data_true,
+        data.data_obs,
+        freqs_2d,
+        noise_2d,
+        AL_q_lower,
+        AL_q_higher,
+        norm_q_lower,
+        norm_q_higher,
+    )
+
+    # use synthetic noise dist to define normal model noise params
+    inv_noise_params["std"] = stds
 
     # for frequency dependent noise model, scale using observed data
     if inv_noise_params["frequency_scaling"]:
@@ -135,6 +167,10 @@ def basic_inversion(
     return inversion, model_params
 
 
+def get_noise_params():
+    pass
+
+
 def run_inversion():
     """
     - Run with sampling prior. Run with setting the starting model, run without.
@@ -145,7 +181,7 @@ def run_inversion():
     set_starting_model = True
     rotate = False
 
-    n_layers = 1
+    n_layers = 2
     noise_dist = "normal"
     # noise_dist = "asym-laplace"
     inv_noise_dist = "normal"
@@ -154,7 +190,7 @@ def run_inversion():
 
     noise_params = {"frequency_scaling": frequency_scaling}
     if noise_dist == "normal":
-        std = 0.100  # 0.050 # 0.150 # km/s
+        std = 0.010  # km/s
         std_percent = 0.10
 
         if frequency_scaling:
@@ -166,17 +202,25 @@ def run_inversion():
             noise_params["std"] = std
 
     elif noise_dist == "asym-laplace":
-        lambd_scale = 0.100  # 0.050 # 0.150 # km/s
+        lambd_scale = 0.200  # 0.050 # 0.150 # km/s
         lambd_scale_percent = 0.10
-        lambd, kappa = 5.6, 0.72
+        # lambd, kappa = 5.6, 0.72
+        lambd, kappa = 5.6, 1.0
 
         noise_params["lambd"] = lambd
         noise_params["kappa"] = kappa
         if frequency_scaling:
+            # scaling by percent
             noise_params["lambd_scale_percent"] = lambd_scale_percent
         else:
+            # IID lambda scale
             noise_params["lambd_scale"] = lambd_scale
-
+            """
+            # scaling by field data
+            df = pd.read_csv("./data/spread/WH04.csv")
+            noise_params["scale_freqs"] = df["freq"]
+            noise_params["lambd_scale"] = df["spread"]
+            """
     inv_noise_params = noise_params.copy()
 
     # currently set up to use same noise params for real noise and for model noise
@@ -206,6 +250,26 @@ def plot_inversion(file_name):
     plot_results(input_ds, results_ds, out_filename=file_name, plot_true_model=True)
 
 
+def plot_compare(file_names):
+    input_ds_list, results_ds_list = [], []
+    for f in file_names:
+        input_path = "./results/inversion/input-" + f + ".nc"
+        results_path = "./results/inversion/results-" + f + ".nc"
+
+        input_ds = xr.open_dataset(input_path)
+        results_ds = xr.open_dataset(results_path)
+
+        input_ds_list.append(input_ds)
+        results_ds_list.append(results_ds)
+
+    model_params_histogram_compare(
+        input_ds_list,
+        results_ds_list,
+        save=True,
+        plot_true_model=True,
+    )
+
+
 if __name__ == "__main__":
     """
     profiling command
@@ -215,10 +279,27 @@ if __name__ == "__main__":
 
     run_inversion()
 
-    # IID normal dist
-    # file_name = "1778183486"
+    # 1 layer
+    # normal IID
+    # std = 0.050
+    # file_name = "1778191004"
 
-    # IID AL dist
-    # file_name = "1778184831"
+    # AL IID
+    # lambd, kappa = 5.6, 1.0, lambd_scale = 0.200
+    # file_name = "1778191173"
+
+    # 2 layers
+    # normal, std = 0.010
+    # file_name = "1778201614"
+
+    # sample prior
+    # file_name = "1778206326"
+    # file_name = "1778530848"
+
+    # normal IID
+    # std = 0.050, n_data=100
+    # file_name = "1778266676"
+    # std = 0.010, n_data=100
+    # file_name = "1778284207"
 
     # plot_inversion(file_name)

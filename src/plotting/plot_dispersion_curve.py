@@ -29,9 +29,9 @@ def plot_results(
         plot_prob_model=plot_prob_model,
         plot_true_model=plot_true_model,
     )
-    model_params_autocorrelation(
-        input_ds, results_ds, save=True, out_filename=out_filename
-    )
+    # model_params_autocorrelation(
+    #     input_ds, results_ds, save=True, out_filename=out_filename
+    # )
     model_params_stepsize(input_ds, results_ds, save=True, out_filename=out_filename)
     model_params_histogram(
         input_ds,
@@ -50,16 +50,16 @@ def plot_results(
         plot_true_model=plot_true_model,
     )
     plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
-    plot_data_pred_frequencies(
-        input_ds, results_ds, save=True, out_filename=out_filename
-    )
+    # plot_data_pred_frequencies(
+    #     input_ds, results_ds, save=True, out_filename=out_filename
+    # )
     plot_likelihood(input_ds, results_ds, save=True, out_filename=out_filename)
-    plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
-    plot_timestep_covariance_matrix(
-        input_ds, results_ds, save=True, out_filename=out_filename
-    )
-    plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
-    plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
+    # plot_covariance_matrix(input_ds, results_ds, save=True, out_filename=out_filename)
+    # plot_timestep_covariance_matrix(
+    #     input_ds, results_ds, save=True, out_filename=out_filename
+    # )
+    # plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
+    # plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -333,7 +333,6 @@ def model_params_autocorrelation(
 
 
 def plot_likelihood(input_ds, results_ds, save=False, out_filename=""):
-
     # n_burn = input_ds.attrs["n_burn"]
     n_burn = int(len(results_ds["step"]) / 3)
 
@@ -479,6 +478,116 @@ def model_params_histogram(
         plt.show()
 
 
+def model_params_histogram_compare(
+    input_ds_list,
+    results_ds_list,
+    n_bins=100,
+    save=False,
+    # out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+):
+    """
+    plot model params vs. time step.
+    plot likelihood vs. time step.
+    plot acceptance rate vs. time step.
+
+    plot param bounds as black vertical lines.
+    plot true model as red vertical lines.
+
+    :param input_ds:
+    :param results_ds:
+    """
+
+    n_layers = input_ds_list[0].attrs["n_layers"]
+
+    param_types = ["depth", "vel_s"]
+    n_param_types = len(param_types)
+
+    fig, ax = plt.subplots(
+        nrows=n_layers + 1,
+        ncols=n_param_types,
+        sharex="col",
+        figsize=(14, 8),
+    )
+
+    for ind in range(len(input_ds_list)):
+        input_ds = input_ds_list[ind]
+        results_ds = results_ds_list[ind]
+
+        # use input_ds to interpret results_ds
+        # n_burn = input_ds.attrs["n_burn"]
+        n_burn = int(len(results_ds["step"]) / 3)
+
+        # cut results by step
+        results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+        # use results_ds to get model params
+        model_params = results_ds["model_params"].values
+
+        # true model
+        if plot_true_model:
+            true_model = input_ds["model_true"]
+        # get most probable model from ds_results
+        if plot_prob_model:
+            probable_model = results_ds["prob_params"]
+
+        # one column for depth, one for vel_s
+        n_layers = input_ds.attrs["n_layers"]
+
+        # loop over all params and plot
+        # use param inds to get param name
+        for c_ind, param in enumerate(param_types):
+            unit_scale = 1
+            if param == "depth":
+                unit_scale = 1000  # unit conversion to m
+            inds = input_ds[param + "_inds"]
+            bounds = unit_scale * input_ds["param_bounds"][inds]
+            full_bounds = [np.min(bounds[:, 0]), np.max(bounds[:, 1])]
+
+            for r_ind, p in enumerate(model_params[inds]):
+                # full bounds
+                ax[r_ind, c_ind].set_xlim([full_bounds[0], full_bounds[1]])
+                # param bounds
+                # ax[r_ind, c_ind].axvspan(
+                #     bounds[r_ind][0], bounds[r_ind][1], color="blue", alpha=0.1
+                # )
+                ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
+                ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
+
+                bins = np.linspace(
+                    bounds[r_ind][0],
+                    bounds[r_ind][1],
+                    n_bins,
+                )
+                # param timeseries
+                ax[r_ind, c_ind].hist(
+                    unit_scale * p, bins=bins, density=True, histtype="step"
+                )
+
+                # true model
+                if plot_true_model:
+                    ax[r_ind, c_ind].axvline(
+                        unit_scale * true_model[inds][r_ind], c="red"
+                    )
+
+                # most probable model
+                if plot_prob_model:
+                    ax[r_ind, c_ind].axvline(
+                        unit_scale * probable_model[inds][r_ind], c="purple"
+                    )
+
+                # axis labels
+                ax[r_ind, c_ind].set_xlabel(param + " " + str(r_ind + 1))
+
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/hist_compare.png")
+    else:
+        plt.show()
+
+
 def resulting_model_histogram(
     input_ds,
     results_ds,
@@ -601,9 +710,9 @@ def resulting_model_histogram(
     ax1.set_xlim(ax1.get_xlim()[::-1])
     plt.gca().invert_yaxis()
 
+    counts[counts == 0] = np.nan
     h = ax2.imshow(
         counts,
-        norm=LogNorm(),
         extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
         aspect="auto",
         interpolation="none",
@@ -615,8 +724,6 @@ def resulting_model_histogram(
         ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
 
     fig.colorbar(h, ax=ax2)
-    # ax2.set_xlim([0, 1])
-    # ax2.set_ylim([100, 0])
     ax2.set_xlabel("vel s (km/s)")
 
     # make these tick labels invisible
@@ -682,11 +789,10 @@ def plot_data_pred_histogram(
     )
     data_bins = np.linspace(np.min(data_preds), np.max(data_preds), n_bins)
 
-    ax[0, 0].hist2d(
-        hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1, norm="log"
-    )
+    ax[0, 0].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
     # fig.colorbar(im, ax=ax, label="count")
 
+    ax[0, 0].set_ylim([0, 1.0])
     ax[0, 0].set_xscale("log")
     ax[0, 0].set_xlabel("frequency (Hz)")
     ax[0, 0].set_ylabel("velocity (km/s)")
@@ -696,19 +802,22 @@ def plot_data_pred_histogram(
     ax[0, 1].axhline(y=0, c="black")
     residuals = (
         results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
-    ) / input_ds.attrs["noise_percent"]
+    )  #  / input_ds.attrs["noise_percent"]
     ax[0, 1].scatter(freqs, residuals)
 
     ax[0, 1].set_xscale("log")
     ax[0, 1].set_xlabel("frequency (Hz)")
     ax[0, 1].set_ylabel(
-        "standardized residuals\n(data pred - data obs) / noise percent"
+        # "standardized residuals\n(data pred - data obs) / noise percent"
+        "residuals\n(data pred - data obs)"
     )
 
     # plot residuals as histogram
     ax[1, 1].hist(residuals, bins=16)
+    ax[1, 1].axvline(x=0, c="black")
     ax[1, 1].set_xlabel(
-        "standardized residuals\n(data pred - data obs) / noise percent"
+        # "standardized residuals\n(data pred - data obs) / noise percent"
+        "residuals\n(data pred - data obs)"
     )
     ax[1, 1].set_ylabel("counts")
 
@@ -718,12 +827,14 @@ def plot_data_pred_histogram(
     diff = (results_ds["data_pred"] - input_ds["data_true"]).values.flatten()
     diff_bins = np.linspace(np.min(diff), np.max(diff), n_bins)
 
-    ax[1, 0].hist2d(hist_freqs, diff, bins=[freq_bins, diff_bins], cmin=1, norm="log")
+    # ax[1, 0].hist2d(hist_freqs, diff, bins=[freq_bins, diff_bins], cmin=1, norm="log")
+    ax[1, 0].hist2d(hist_freqs, diff, bins=[freq_bins, diff_bins], cmin=1)
+    ax[1, 0].axhline(y=0, c="black")
     # fig.colorbar(im, ax=ax, label="count")
 
     ax[1, 0].set_xscale("log")
     ax[1, 0].set_xlabel("frequency (Hz)")
-    ax[1, 0].set_ylabel("data pred - data obs")
+    ax[1, 0].set_ylabel("data pred - data true")
 
     if save:
         plt.savefig("figures/" + out_filename + "/data-" + out_filename + ".png")
@@ -750,7 +861,7 @@ def plot_data_pred_frequencies(
     noise_percent = input_ds.attrs["noise_percent"]
     if input_ds.attrs["noise_dist"] == "asym-laplace":
         lambd, kappa = input_ds.attrs["lambd"], input_ds.attrs["kappa"]
-        lambd = (1 / (3.5 * noise_percent)) * lambd
+        lambd = (1 / noise_percent) * lambd
 
     x = np.linspace(-50, 50, 100000)
 
