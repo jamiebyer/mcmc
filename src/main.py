@@ -119,7 +119,6 @@ def basic_inversion(
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
     # plot synthetic data
-    # """
     (
         freqs_2d,
         noise_2d,
@@ -129,6 +128,7 @@ def basic_inversion(
         norm_q_higher,
         stds,
     ) = data.generate_noise_dist()
+    """
     data.plot_simulated_data_hist2d(
         freqs_2d,
         noise_2d,
@@ -147,11 +147,11 @@ def basic_inversion(
         norm_q_higher,
         stds,
     )
-    # """
-    # raise ValueError
+    """
 
     # use synthetic noise dist to define normal model noise params
     inv_noise_params["std"] = stds
+    # raise ValueError
 
     # for frequency dependent noise model, scale using observed data
     if inv_noise_params["frequency_scaling"]:
@@ -163,6 +163,17 @@ def basic_inversion(
             )
 
     model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": inv_noise_params}
+
+    """
+    df = pd.DataFrame(
+        {
+            "frequency": 1 / data.periods,
+            "data_obs": data.data_obs,
+            "std": inv_noise_params["std"],
+        }
+    )
+    df.to_csv("./results/data_obs.csv")
+    """
 
     # run inversion
     inversion = Inversion(
@@ -189,16 +200,17 @@ def run_inversion():
     set_starting_model = True
     rotate = False
 
-    n_layers = 1
-    # noise_dist = "normal"
-    noise_dist = "asym-laplace"
-    # inv_noise_dist = "normal"
-    inv_noise_dist = "asym-laplace"
+    n_layers = 2
+    noise_dist = "normal"
+    # noise_dist = "asym-laplace"
+    inv_noise_dist = "normal"
+    # inv_noise_dist = "asym-laplace"
     frequency_scaling = False
 
     noise_params = {"frequency_scaling": frequency_scaling}
     if noise_dist == "normal":
         std = 0.010  # km/s
+        # std = 0.07472376455521576
         std_percent = 0.10
 
         if frequency_scaling:
@@ -212,8 +224,11 @@ def run_inversion():
     elif noise_dist == "asym-laplace":
         lambd_scale = 0.200  # 0.050 # 0.150 # km/s
         lambd_scale_percent = 0.10
+        # lambd, kappa = 5.6, 1.50
+        lambd, kappa = 5.6, 0.50
+        # lambd, kappa = 5.6, 0.65
         # lambd, kappa = 5.6, 0.72
-        lambd, kappa = 5.6, 1.0
+        # lambd, kappa = 5.6, 1.0
 
         noise_params["lambd"] = lambd
         noise_params["kappa"] = kappa
@@ -285,7 +300,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    run_inversion()
+    # run_inversion()
 
     # 1 layer
     # normal IID
@@ -310,4 +325,5 @@ if __name__ == "__main__":
     # std = 0.010, n_data=100
     # file_name = "1778284207"
 
-    # plot_inversion(file_name)
+    file_name = "1778701123"
+    plot_inversion(file_name)
