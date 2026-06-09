@@ -55,7 +55,8 @@ def setup_test_model(n_layers):
         }
     elif n_layers == 2:
         bounds = {
-            "depth": np.array([0.001, 0.15]),  # km
+            # "depth": np.array([0.001, 0.15]),  # km
+            "depth": np.array([[0.001, 0.075], [0.075, 0.15]]),  # km
             # "vel_s": [0.1, 1.8],  # km/s
             "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
         }
@@ -326,4 +327,39 @@ if __name__ == "__main__":
     # file_name = "1778284207"
 
     file_name = "1778701123"
+
+    ###
+    # noise: normal (0.010), inv_noise: normal (0.010)
+    # file_name = "1778607344"
+
+    # noise: AL, inv_noise: normal #IID scaling
+    # file_name = "1778608678"
+
+    # noise: AL, inv_noise: normal # field data scaling
+    # file_name = "1778609260"
+
+    # run with layer sorting, constrained prior
+    # file_name = "1778700782"
+    # run without layer sorting, constrained prior
+    # file_name = "1778701123"
+
+    # 1 layer
+    # noise: normal (0.025), inv_noise: normal #IID scaling
+    # file_name = "1778807879"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=1.0
+    # file_name = "1778808384"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
+    # file_name = "1778808474"
+    # noise: AL, inv_noise: normal #IID scaling, kappa=1.0
+    # file_name = "1778808734"
+    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
+    # file_name = "1778809012"
+
+    # flip residuals...
+    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
+    # file_name = "1778866691"
+    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
+    # file_name = "1778869269"
+    file_name = "1778870140"
+
     plot_inversion(file_name)

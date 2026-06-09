@@ -245,6 +245,8 @@ class SyntheticData(Data):
             freqs_2d += len(picks) * [1 / self.periods[ind]]
             noise_2d += picks
 
+        stds = np.array(stds)
+
         return (
             freqs_2d,
             noise_2d,
