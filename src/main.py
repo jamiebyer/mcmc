@@ -154,7 +154,6 @@ def basic_inversion(
     data = setup_test_data(model_params, noise_dist, noise_params, depth, vel_s)
 
     # plot synthetic data
-    """
     (
         freqs_2d,
         noise_2d,
@@ -164,6 +163,7 @@ def basic_inversion(
         norm_q_higher,
         stds,
     ) = data.generate_noise_dist()
+    """
     data.plot_simulated_data_hist2d(
         freqs_2d,
         noise_2d,
@@ -183,7 +183,6 @@ def basic_inversion(
         stds,
     )
     """
-    # raise ValueError
 
     # use synthetic noise dist to define normal model noise params
     if noise_dist == "asym-laplace" and inv_noise_dist == "normal":
@@ -233,6 +232,17 @@ def basic_inversion(
             )
     """
     model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": inv_noise_params}
+
+    """
+    df = pd.DataFrame(
+        {
+            "frequency": 1 / data.periods,
+            "data_obs": data.data_obs,
+            "std": inv_noise_params["std"],
+        }
+    )
+    df.to_csv("./results/data_obs.csv")
+    """
 
     # run inversion
     inversion = Inversion(

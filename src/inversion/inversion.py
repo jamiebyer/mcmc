@@ -386,6 +386,15 @@ class Inversion:
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
+            if n_steps == 1000:
+                print(n_steps)
+            elif n_steps == 40000:
+                print(n_steps)
+            elif n_steps == 60000:
+                print(n_steps)
+            elif n_steps == 80000:
+                print(n_steps)
+
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]

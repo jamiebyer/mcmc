@@ -137,9 +137,9 @@ class Model:
                     else:
                         self.acceptance_rate["n_fm_err"] += 1
                     valid_params = False
-                    data_pred_new = np.empty(len(periods))
+                    data_pred_new = None
         else:
-            data_pred_new = np.empty(len(periods))
+            data_pred_new = None
 
         return valid_params, data_pred_new
 
@@ -229,17 +229,16 @@ class Model:
             data.periods, test_model_params, ind, sample_prior
         )
 
-        if sample_prior:
-            # for testing and sampling the prior, return perfect likelihood and empty data.
-            logL_new = 1
-        else:
-            # calculate likelihood with predicted data
-            logL_new = Model.get_likelihood(
-                data, data_pred_new, self.noise_dist, self.noise_params
-            )
-
         acc = False
         if valid_params:
+            if sample_prior:
+                # for testing and sampling the prior, return perfect likelihood and empty data.
+                logL_new = 1
+            else:
+                # calculate likelihood with predicted data
+                logL_new = Model.get_likelihood(
+                    data, data_pred_new, self.noise_dist, self.noise_params
+                )
             # check acceptance criteria
             acc = self.acceptance_criteria(logL_new, T=T)
             if acc:

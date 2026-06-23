@@ -298,20 +298,29 @@ class SyntheticData(Data):
             inds_2d = np.isclose(freqs_2d, np.repeat(freq, len(freqs_2d)))
 
             plt.clf()
-
-            plt.axvline(self.data_true[ind], c="red", label="data true")
-            plt.axvline(self.data_obs[ind], c="red", ls="--", label="data obs")
+            fig = plt.figure(figsize=(10, 10))
+            plt.axvline(self.data_true[ind], c="white", linewidth=3)
+            plt.axvline(
+                self.data_true[ind],
+                c="black",
+                linewidth=3,
+                label="true datum",
+                ls=(0, (5, 5)),
+            )
+            # plt.axvline(self.data_obs[ind], c="red", ls="--", label="data obs")
 
             # plot hist of noise at this frequency
-            plt.hist(np.array(noise_2d)[inds_2d], bins=30, density=True)
+            plt.hist(
+                np.array(noise_2d)[inds_2d], bins=30, density=True, color="darkgrey"
+            )
 
             # plot AL distribution
             x, pdf, cdf, q_5, q_95 = self.get_noise_pdf(
                 self.noise_dist, self.noise_params, mu=self.data_true[ind], freq_ind=ind
             )
-            plt.plot(x, pdf, label="AL")
-            plt.axvline(q_5, c="black")
-            plt.axvline(q_95, c="black")
+            plt.plot(x, pdf, label="Asymmetric Laplace")
+            # plt.axvline(q_5, c="black")
+            # plt.axvline(q_95, c="black")
 
             # plot normal distribution
             x, pdf, cdf, q_5, q_95 = SyntheticData.get_noise_pdf(
@@ -320,13 +329,17 @@ class SyntheticData(Data):
                 mu=self.data_true[ind],
                 freq_ind=ind,
             )
-            plt.plot(x, pdf, label="normal")
-            plt.axvline(q_5, c="black", ls="--")
-            plt.axvline(q_95, c="black", ls="--")
+            plt.plot(x, pdf, label="Gaussian")
+            # plt.axvline(q_5, c="black", ls="--")
+            # plt.axvline(q_95, c="black", ls="--")
 
-            plt.legend()
+            plt.legend(fontsize=18)
 
-            plt.xlim([-0.1, 1.5])
+            # plt.xlim([-0.1, 1.5])
+            plt.xlim([0.4, 1.4])
+            plt.xlabel("velocity (km/s)", fontsize=20)
+            plt.ylabel("counts", fontsize=20)
+            plt.tick_params(axis="both", which="major", labelsize=18)
 
             plt.title(
                 "freq: "
@@ -357,15 +370,17 @@ class SyntheticData(Data):
         # loop over frequencies
         # generate 10000 points from asymmetric laplacian distribution
         plt.clf()
+        fig = plt.figure(figsize=(14, 10))
         freq_bins = np.logspace(
             np.log10(np.min(freqs_2d)),
             np.log10(np.max(freqs_2d)),
             len(self.periods) + 1,
         )
         noise_bins = np.linspace(np.min(noise_2d), np.max(noise_2d), 150)
-        # plt.hist2d(freqs_2d, noise_2d, bins=[freq_bins, noise_bins])
+        plt.hist2d(freqs_2d, noise_2d, bins=[freq_bins, noise_bins], cmin=0.001)
 
         # plot 2d histogram with normalizing each column/frequency
+        """
         hist, xedges, yedges = np.histogram2d(
             freqs_2d, noise_2d, bins=[freq_bins, noise_bins]
         )
@@ -373,7 +388,7 @@ class SyntheticData(Data):
         hist *= 1 / hist.sum(axis=0, keepdims=True)
         hist[hist == 0] = np.nan
         mesh = plt.pcolormesh(xedges, yedges, hist)
-
+        """
         # show true data, generated observed data
         """
         plt.errorbar(
@@ -397,18 +412,28 @@ class SyntheticData(Data):
             zorder=3,
         )
         """
-        plt.scatter(
+        plt.plot(
             1 / self.periods,
             self.data_true,
-            label="data true",
-            c="darkgrey",
-            edgecolors="black",
+            c="white",
+            linewidth=3,
+            # edgecolors="black",
+            zorder=4,
+        )
+        plt.plot(
+            1 / self.periods,
+            self.data_true,
+            label="true data",
+            c="black",
+            linewidth=3,
+            ls=(0, (5, 5)),
+            # edgecolors="black",
             zorder=4,
         )
         plt.scatter(
             1 / self.periods,
             self.data_obs,
-            label="data obs",
+            label="observed data",
             c="white",
             edgecolors="black",
             zorder=4,
@@ -417,8 +442,8 @@ class SyntheticData(Data):
         plt.ylim([0, 1.5])
         plt.xscale("log")
 
-        plt.xlabel("frequency (Hz)")
-        plt.ylabel("velocity (km/s)")
+        plt.xlabel("frequency (Hz)", fontsize=20)
+        plt.ylabel("phase velocity (km/s)", fontsize=20)
 
         # plt.title(
         #     "kappa: "
@@ -427,8 +452,12 @@ class SyntheticData(Data):
         #     + str(self.noise_params["lambd"])
         # )
 
-        plt.legend()
-        plt.colorbar(mesh)
+        plt.legend(fontsize=18)
+        cb = plt.colorbar()
+        cb.set_ticks([])
+        # cb.set_label("counts")
+
+        plt.tick_params(axis="both", which="major", labelsize=18)
 
         # plt.show()
         plt.savefig("./figures/simulated_data/hist2d.png")
