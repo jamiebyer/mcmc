@@ -257,6 +257,12 @@ class SyntheticData(Data):
             stds,
         )
 
+    def fit_error_dist(error_dist):
+        """
+        Fit error distribution with Asymmetric Laplacian.
+        """
+        pass
+
     def plot_simulated_data_frequencies(
         self,
         freqs_2d,

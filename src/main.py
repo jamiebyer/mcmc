@@ -149,10 +149,10 @@ def basic_inversion(
         stds,
     )
     """
-
+    print(np.mean(stds))
     # use synthetic noise dist to define normal model noise params
     inv_noise_params["std"] = stds
-    # raise ValueError
+    raise ValueError
 
     # for frequency dependent noise model, scale using observed data
     if inv_noise_params["frequency_scaling"]:
@@ -202,8 +202,8 @@ def run_inversion():
     rotate = False
 
     n_layers = 2
-    noise_dist = "normal"
-    # noise_dist = "asym-laplace"
+    # noise_dist = "normal"
+    noise_dist = "asym-laplace"
     inv_noise_dist = "normal"
     # inv_noise_dist = "asym-laplace"
     frequency_scaling = False
@@ -223,6 +223,9 @@ def run_inversion():
             noise_params["std"] = std
 
     elif noise_dist == "asym-laplace":
+        # 0.055: 0.02456599088986876
+        # 0.130: 0.04999076164489357
+        # 0.200: 0.07472376455521576
         lambd_scale = 0.200  # 0.050 # 0.150 # km/s
         lambd_scale_percent = 0.10
         # lambd, kappa = 5.6, 1.50
@@ -301,7 +304,7 @@ if __name__ == "__main__":
     snakeviz profiling_stats.prof
     """
 
-    # run_inversion()
+    run_inversion()
 
     # 1 layer
     # normal IID
@@ -326,7 +329,7 @@ if __name__ == "__main__":
     # std = 0.010, n_data=100
     # file_name = "1778284207"
 
-    file_name = "1778701123"
+    # file_name = "1778701123"
 
     ###
     # noise: normal (0.010), inv_noise: normal (0.010)
@@ -360,6 +363,6 @@ if __name__ == "__main__":
     # file_name = "1778866691"
     # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
     # file_name = "1778869269"
-    file_name = "1778870140"
+    # file_name = "1778870140"
 
-    plot_inversion(file_name)
+    # plot_inversion(file_name)
