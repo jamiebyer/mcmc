@@ -33,8 +33,13 @@ class Data:
             "attrs": {"noise_dist": self.noise_dist},
         }
 
-        # for k, v in self.noise_params.items():
-        #     data_dict["attrs"][k] = v
+        for k, v in self.noise_params.items():
+            if isinstance(v, list):
+                data_dict["data_vars"][k] = {"dims": ["period"], "data": v}
+            elif isinstance(v, bool):
+                data_dict["attrs"][k] = np.sum(v)
+            else:
+                data_dict["attrs"][k] = v
 
         return data_dict
 
@@ -57,6 +62,8 @@ class SyntheticData(Data):
         self.data_true = data_true
 
         # for frequency dependent noise, scale using the true data
+        # for percent scaling
+        """
         if noise_params["frequency_scaling"]:
             if noise_dist == "normal":
                 noise_params["std"] = noise_params["std_percent"] * data_true
@@ -64,7 +71,7 @@ class SyntheticData(Data):
                 noise_params["lambd_scale"] = (
                     noise_params["lambd_scale_percent"] * data_true
                 )
-
+        """
         # generate observed data
         data_obs = self.generate_observed_data(periods, noise_dist, noise_params)
 
