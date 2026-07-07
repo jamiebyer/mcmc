@@ -7,6 +7,7 @@
 #SBATCH --mem=5G
 #SBATCH --partition=cpu2019
 #SBATCH -o ./report/output.%a.out # STDOUT
+#SBATCH --array=0-10
 
 ####### Set environment variables ###############
 source ../miniforge3/bin/activate
@@ -14,6 +15,6 @@ eval "$(conda shell.bash hook)"
 conda activate ant_env
 
 ####### Run your script #########################
-python src/main.py
+python src/main.py $SLURM_ARRAY_TASK_ID
 
 

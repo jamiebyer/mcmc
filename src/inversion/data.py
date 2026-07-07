@@ -136,7 +136,7 @@ class SyntheticData(Data):
             lambd_scaling = noise_params["lambd_scale"]
 
             mu = 0
-            lambd = (1 / lambd_scaling) * lambd
+            lambd = lambd_scaling * lambd
 
             # for each frequency, define the pdf for the error distribution
             # integrate to get the cdf
@@ -148,7 +148,7 @@ class SyntheticData(Data):
                     l = lambd
                 else:
                     l = lambd[ind]
-
+                
                 s = np.sign(x - mu)
                 pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
 
@@ -190,7 +190,7 @@ class SyntheticData(Data):
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
             lambd_scaling = noise_params["lambd_scale"]
 
-            lambd = (1 / lambd_scaling) * lambd
+            lambd = lambd_scaling * lambd
 
             if isinstance(lambd, float):
                 l = lambd
