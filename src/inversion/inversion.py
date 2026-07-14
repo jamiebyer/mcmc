@@ -88,11 +88,11 @@ class Inversion:
         # save input inversion params and data info
         # create dataset
         # update with dictionary from data class
-        self.define_input_dataset(data, model_params)
+        self.define_input_dataset(data, model_params, noise_dist, noise_params)
 
-    def define_input_dataset(self, data, model_params):
+    def define_input_dataset(self, data, model_params, noise_dist, noise_params):
         # get data dict and model params dict
-        input_dict = {"coords": {}, "data_vars": {}, "attrs": {}}
+        input_dict = {"coords": {}, "data_vars": {}, "attrs": {"inv_noise_dist": noise_dist}}
 
         m_dict = model_params.get_model_params_dict()
         d_dict = data.get_data_dict()
@@ -111,6 +111,14 @@ class Inversion:
         input_dict["dims"] = {
             k: len(v["data"]) for k, v in input_dict["coords"].items()
         }
+
+        for k, v in noise_params.items():
+            if isinstance(v, list):
+                input_dict["data_vars"]["inv_" + k] = {"dims": ["period"], "data": v}
+            elif isinstance(v, bool):
+                input_dict["attrs"]["inv_" + k] = np.sum(v)
+            else:
+                input_dict["attrs"]["inv_" + k] = v
 
         input_ds = xr.Dataset.from_dict(input_dict)
 

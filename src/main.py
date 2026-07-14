@@ -1,6 +1,9 @@
 import cProfile
 from pstats import Stats, SortKey
+import sys
 import os
+from time import sleep
+
 import numpy as np
 import pandas as pd
 
@@ -21,8 +24,9 @@ def setup_test_data(model_params, noise_dist, noise_params, depth, vel_s):
     if "scale_freqs" in noise_params:
         periods = np.flip(1 / noise_params["scale_freqs"])
     else:
-        n_data = 100
-        periods = np.flip(1 / np.logspace(0, 1.1, n_data))
+        n_data = 40
+        # periods = np.flip(1 / np.logspace(-1, 1.2, n_data))
+        periods = np.flip(1 / np.logspace(0.3, 1.3, n_data))
 
     # run synthetic data that uses inversion calculations for vel_p and density
     # and optionally, setting vel_p and density exactly.
@@ -55,10 +59,11 @@ def setup_test_model(n_layers):
         }
     elif n_layers == 2:
         bounds = {
-            # "depth": np.array([0.001, 0.15]),  # km
-            "depth": np.array([[0.001, 0.075], [0.075, 0.15]]),  # km
-            # "vel_s": [0.1, 1.8],  # km/s
-            "vel_s": np.array([[0.100, 0.500], [0.300, 1.000], [0.750, 2.000]]),  # km/s
+            "depth": np.array([0.001, 0.10]),  # km
+            # model 1
+            "vel_s": np.array([[0.100, 0.700], [0.100, 0.700], [1.000, 2.000]]),  # km/s
+            # model 2
+            # "vel_s": np.array([0.050, 2.000]),  # km/s
         }
     elif n_layers == 3:
         bounds = {
@@ -78,7 +83,32 @@ def setup_test_model(n_layers):
     return model_params
 
 
+def generate_model(ind):
+    """
+    noise: [25, 75]
+    thickness 1: [10, 20, 30]
+    thickness 2: [10, 20, 30, 40, 50, 60]
+    vel s 1: [150, 200, 300, 400, 500]
+    vel s 2: [300, 400, 500, 600, 700, 800]
+    vel s 3: [600, 800, 1000, 1200, 1500]
+    """
+    d_list = []
+    v_list = []
+    for t1 in [0.010, 0.020, 0.030]:
+        for t2 in [0.010, 0.020, 0.030, 0.040, 0.050, 0.060]:
+            for v1 in [0.150, 0.200, 0.300, 0.400, 0.500]:
+                for v2 in [0.300, 0.400, 0.500, 0.600, 0.700, 0.800]:
+                    for v3 in [0.600, 0.800, 1.000, 1.200, 1.500]:
+                        if v1 < v2 and v2 < v3:
+                            depth = [t1, t1 + t2]
+                            vel_s = [v1, v2, v3]
+                            d_list.append(depth)
+                            v_list.append(vel_s)
+    return d_list[ind], v_list[ind]
+
+
 def basic_inversion(
+    ind,
     n_layers,
     noise_dist,
     noise_params,
@@ -94,7 +124,7 @@ def basic_inversion(
     inversion_init_kwargs = {
         "n_burn": 10000,
         "n_chunk": 500,
-        "n_mcmc": 100000,
+        "n_mcmc": 50000,
         "n_cov_chunk": 500,
         "n_thin": 10,
         "n_chains": 1,
@@ -108,9 +138,13 @@ def basic_inversion(
         vel_s = [0.4, 1.0]
     elif n_layers == 2:
         # two layers
-        # depth = [0.02, 0.08]
-        depth = [0.05, 0.10]
-        vel_s = [0.2, 0.6, 1.5]
+        # model 1
+        if ind == None:
+            depth = [0.010, 0.063]
+            vel_s = [0.200, 0.400, 1.700]
+        else:
+            depth, vel_s = generate_model(ind)
+
     elif n_layers == 3:
         # three layers
         depth = [0.02, 0.04, 0.1]
@@ -129,7 +163,7 @@ def basic_inversion(
         norm_q_higher,
         stds,
     ) = data.generate_noise_dist()
-    """
+    # """
     data.plot_simulated_data_hist2d(
         freqs_2d,
         noise_2d,
@@ -148,13 +182,48 @@ def basic_inversion(
         norm_q_higher,
         stds,
     )
-    """
+    # """
+    raise ValueError
     print(np.mean(stds))
     # use synthetic noise dist to define normal model noise params
-    inv_noise_params["std"] = stds
-    raise ValueError
+    if noise_dist == "asym-laplace" and inv_noise_dist == "normal":
+        (
+            freqs_2d,
+            noise_2d,
+            AL_q_lower,
+            AL_q_higher,
+            norm_q_lower,
+            norm_q_higher,
+            stds,
+        ) = data.generate_noise_dist()
+        inv_noise_params["std"] = stds
+
+        """
+        SyntheticData.plot_simulated_data_hist2d(
+            data.periods,
+            data.data_true,
+            data.data_obs,
+            freqs_2d,
+            noise_2d,
+            AL_q_lower,
+            AL_q_higher,
+            norm_q_lower,
+            norm_q_higher,
+        )
+        """
+    elif noise_dist == "normal" and inv_noise_dist == "asym-laplace":
+        inv_noise_params["kappa"] = 1.0
+        inv_noise_params["lambd_scale"] = 1
+        if noise_params["std"] == 0.025:
+            inv_noise_params["lambd"] = 14.03508769968587
+        elif noise_params["std"] == 0.075:
+            inv_noise_params["lambd"] = 4.622714571212673
+    elif noise_dist == inv_noise_dist:
+        inv_noise_params = noise_params.copy()
 
     # for frequency dependent noise model, scale using observed data
+    # for percent scaling only
+    """
     if inv_noise_params["frequency_scaling"]:
         if inv_noise_dist == "normal":
             inv_noise_params["std"] = inv_noise_params["std_percent"] * data.data_obs
@@ -162,7 +231,7 @@ def basic_inversion(
             inv_noise_params["lambd_scale"] = (
                 inv_noise_params["lambd_scale_percent"] * data.data_obs
             )
-
+    """
     model_kwargs = {"noise_dist": inv_noise_dist, "noise_params": inv_noise_params}
 
     """
@@ -187,11 +256,7 @@ def basic_inversion(
     return inversion, model_params
 
 
-def get_noise_params():
-    pass
-
-
-def run_inversion():
+def run_inversion(ind=None):
     """
     - Run with sampling prior. Run with setting the starting model, run without.
     - Run with 1 layer, 2 layers.
@@ -206,11 +271,12 @@ def run_inversion():
     noise_dist = "asym-laplace"
     inv_noise_dist = "normal"
     # inv_noise_dist = "asym-laplace"
-    frequency_scaling = False
+    frequency_scaling = True
 
     noise_params = {"frequency_scaling": frequency_scaling}
     if noise_dist == "normal":
-        std = 0.010  # km/s
+        # std = 0.0001  # km/s
+        std = 0.075  # km/s
         # std = 0.07472376455521576
         std_percent = 0.10
 
@@ -223,14 +289,14 @@ def run_inversion():
             noise_params["std"] = std
 
     elif noise_dist == "asym-laplace":
-        # 0.055: 0.02456599088986876
-        # 0.130: 0.04999076164489357
-        # 0.200: 0.07472376455521576
-        lambd_scale = 0.200  # 0.050 # 0.150 # km/s
-        lambd_scale_percent = 0.10
+        lambd_scale = 1.0  # 0.055 # 0.130 # 0.200 # km/s
+        # lambd_scale_percent = 0.10
+        # lambd, kappa = 14.03508769968587, 1.0 # normal std = 0.025
+        # lambd, kappa = 1 / 3.6018791201809166, 0.8638603408785489  # site WH04
+        # lambd, kappa = 1 / 3.4810418851812988, 0.9364592177215896  # site WH01
+        lambd, kappa = 1, 0.9364592177215896  # site WH01
+
         # lambd, kappa = 5.6, 1.50
-        lambd, kappa = 5.6, 0.50
-        # lambd, kappa = 5.6, 0.65
         # lambd, kappa = 5.6, 0.72
         # lambd, kappa = 5.6, 1.0
 
@@ -238,7 +304,21 @@ def run_inversion():
         noise_params["kappa"] = kappa
         if frequency_scaling:
             # scaling by percent
-            noise_params["lambd_scale_percent"] = lambd_scale_percent
+            # noise_params["lambd_scale_percent"] = lambd_scale_percent
+            # scaling by field data
+            """
+            df = pd.read_csv("./data/spread/WH01.csv")
+            noise_params["scale_freqs"] = df["freq"].values
+            noise_params["lambd_scale"] = np.flip(1 / df["spread"].values)
+            noise_params["lambd_max"] = 0.02
+            """
+
+            df = pd.read_csv("./data/spread/WH01-asym-laplace-params.csv")
+            noise_params["scale_freqs"] = df["freqs"].values
+            noise_params["lambd_scale"] = np.flip(df["scaled_lambd"].values)
+            noise_params["lambd_scale"][noise_params["lambd_scale"] > 60] = 60
+            # noise_params["lambd_max"] = 0.02
+
         else:
             # IID lambda scale
             noise_params["lambd_scale"] = lambd_scale
@@ -248,10 +328,11 @@ def run_inversion():
             noise_params["scale_freqs"] = df["freq"].values
             noise_params["lambd_scale"] = df["spread"].values
             """
-    inv_noise_params = noise_params.copy()
+    inv_noise_params = {"frequency_scaling": noise_params["frequency_scaling"]}
 
     # currently set up to use same noise params for real noise and for model noise
     inversion, model_params = basic_inversion(
+        ind,
         n_layers=n_layers,
         noise_dist=noise_dist,
         noise_params=noise_params,
@@ -303,6 +384,11 @@ if __name__ == "__main__":
     python -m cProfile -o profiling_stats.prof src/main.py
     snakeviz profiling_stats.prof
     """
+    # ind = int(sys.argv[1])
+    # for ind in range(23, 50):
+    # for ind in range(500, 525):
+    #     run_inversion(ind)
+    #    sleep(1)
 
     run_inversion()
 
@@ -316,53 +402,95 @@ if __name__ == "__main__":
     # file_name = "1778191173"
 
     # 2 layers
-    # normal, std = 0.010
-    # file_name = "1778201614"
+    # model 4, std=0.025
+    # file_name = "1781113055"
+    # std=0.050
+    # file_name = "1781115461"
+    # std=0.075
+    # file_name = "1781113173"
 
-    # sample prior
-    # file_name = "1778206326"
-    # file_name = "1778530848"
+    # model 4
+    # 0.055: 0.02456599088986876
+    # noise: AL, model: AL
+    # file_name = "1781626367"
+    # noise: AL, model: normal
+    # file_name = "1781626685"
 
-    # normal IID
-    # std = 0.050, n_data=100
-    # file_name = "1778266676"
-    # std = 0.010, n_data=100
-    # file_name = "1778284207"
+    # 0.130: 0.04999076164489357
+    # noise: AL, model: AL
+    # file_name = "1781626752"
+    # noise: AL, model: normal
+    # file_name = "1781626996"
 
-    # file_name = "1778701123"
+    # 0.200: 0.07472376455521576
+    # noise: AL, model: AL
+    # file_name = "1781627173"
+    # noise: AL, model: normal
+    # file_name = "1781627461"
 
-    ###
-    # noise: normal (0.010), inv_noise: normal (0.010)
-    # file_name = "1778607344"
+    # original bandwidth
+    # kappa: 2.00
+    # 0.055: 0.02456599088986876
+    # noise: AL, model: AL
+    # file_name = "1781637667"
+    # noise: AL, model: normal
+    # file_name = "1781637987"
 
-    # noise: AL, inv_noise: normal #IID scaling
-    # file_name = "1778608678"
+    # kappa: 1.50
+    # noise: AL, model: AL
+    # file_name = "1781638124"
+    # noise: AL, model: normal
+    # file_name = "1781638435"
 
-    # noise: AL, inv_noise: normal # field data scaling
-    # file_name = "1778609260"
+    # shorter bandwidth
+    # kappa = 0.50, lambd_scale = 0.055
+    # noise: AL, model: AL
+    # file_name = "1781732831"
+    # noise: AL, model: normal
+    # file_name = "1781733045"
 
-    # run with layer sorting, constrained prior
-    # file_name = "1778700782"
-    # run without layer sorting, constrained prior
-    # file_name = "1778701123"
+    # kappa = 0.50, lambd_scale = 0.200
+    # noise: AL, model: AL
+    # file_name = "1781733273"
+    # noise: AL, model: normal
+    # file_name = "1781733486"
 
-    # 1 layer
-    # noise: normal (0.025), inv_noise: normal #IID scaling
-    # file_name = "1778807879"
-    # noise: AL, inv_noise: AL #IID scaling, kappa=1.0
-    # file_name = "1778808384"
-    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
-    # file_name = "1778808474"
-    # noise: AL, inv_noise: normal #IID scaling, kappa=1.0
-    # file_name = "1778808734"
-    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
-    # file_name = "1778809012"
+    # kappa = 0.25, lambd_scale = 0.055
+    # noise: AL, model: AL
+    # file_name = "1781735471"
+    # noise: AL, model: normal
+    # file_name = "1781735660"
 
-    # flip residuals...
-    # noise: AL, inv_noise: normal #IID scaling, kappa=0.72
-    # file_name = "1778866691"
-    # noise: AL, inv_noise: AL #IID scaling, kappa=0.72
-    # file_name = "1778869269"
-    # file_name = "1778870140"
+    # kappa = 0.25, lambd = 5.6*0.200
+    # noise: AL, model: AL
+    # file_name = "1781735993"
+    # noise: AL, model: normal
+    # file_name = "1781736155"
+
+    # saving dist
+    # kappa = 0.25, lambd = 5.6*0.055
+    # noise: AL, model: AL
+    # file_name = "1781814326"
+    # noise: AL, model: normal
+    # file_name = "1781819964"
+
+    # normal std: 0.025, kappa = 0, lambd = 14.03508769968587
+    # noise: normal, model: normal
+    # file_name = "1782169807"
+    # noise: normal, model: AL
+    # file_name = "1782171590"
+    # file_name = "1782236521"
+
+    # normal std: 0.075, kappa = 0, lambd = 4.622714571212673
+    # noise: normal, model: normal
+    # file_name = "1782172312"
+    # noise: normal, model: AL
+    # file_name = "1782173269"
+    # file_name = "1782235298"
+    # file_name = "1782236648"
+
+    # frequency scaled
+    # file_name = "1782238926"
+    # file_name = "1782239972"
 
     # plot_inversion(file_name)

@@ -21,13 +21,15 @@ def plot_results(
     if not os.path.isdir("./figures/" + out_filename):
         os.mkdir("./figures/" + out_filename)
 
+    # plot_poster_results_data(
+    #     input_ds, results_ds, n_bins=200, save=True, out_filename=out_filename
+    # )
+    # plot_poster_results_profile(
+    #     input_ds, results_ds, n_bins=200, save=True, out_filename=out_filename
+    # )
     # plot_data_pred_validate(input_ds, results_ds, save=True, out_filename=out_filename)
-    plot_data_pred_validate_v2(
-        input_ds, results_ds, save=True, out_filename=out_filename
-    )
-    # plot_poster_results(input_ds, results_ds, save=True, out_filename=out_filename)
 
-    """
+    # """
     save_inversion_info(input_ds, results_ds, out_filename=out_filename)
 
     model_params_timeseries(
@@ -69,7 +71,7 @@ def plot_results(
     # )
     # plot_vs30(input_ds, results_ds, save=True, out_filename=out_filename)
     # plot_surface_waves(input_ds, results_ds, save=True, out_filename=out_filename)
-    """
+    # """
 
 
 def save_inversion_info(input_ds, results_ds, out_filename=""):
@@ -715,7 +717,7 @@ def resulting_model_histogram(
             np.max(depth_bounds[:, 1]) * 1000,
         ]
     )
-    ax1.set_ylabel("depth (m)")
+    ax1.set_ylabel("Depth (m)")
 
     ax1.set_xlim(ax1.get_xlim()[::-1])
     plt.gca().invert_yaxis()
@@ -731,20 +733,77 @@ def resulting_model_histogram(
     # plot true model overtop
     if plot_true_model:
         true_model = np.array(true_model)
-        ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
+        ax2.plot(true_model[:, 1], true_model[:, 0], c="white")
+        ax2.plot(true_model[:, 1], true_model[:, 0],
+            c="black",
+            ls=(0, (5, 5)),
+            label="true model",
+        )
 
     fig.colorbar(h, ax=ax2)
-    ax2.set_xlabel("vel s (km/s)")
+    ax2.set_xlabel("Shear-wave velocity (km/s)")
 
     # make these tick labels invisible
     ax2.tick_params("y", labelleft=False)
 
+    plt.legend()
     plt.tight_layout()
 
     if save:
         plt.savefig("figures/" + out_filename + "/profile-" + out_filename + ".png")
     else:
         plt.show()
+
+
+def get_noise_params(noise_dist, input_ds, inv):
+    if inv:
+        prefix = "inv_"
+    else:
+        prefix = ""
+    
+    noise_params = {}
+    noise_params["frequency_scaling"] = (input_ds.attrs[prefix + "frequency_scaling"] == 1)
+    if noise_dist == "normal":
+        noise_params["std"] = input_ds.attrs[prefix + "std"]
+    elif noise_dist == "asym-laplace":
+        noise_params["lambd"] = input_ds.attrs[prefix + "lambd"]
+        noise_params["kappa"] = input_ds.attrs[prefix + "kappa"]
+        noise_params["lambd_scale"] = input_ds.attrs[prefix + "lambd_scale"]
+    
+    return noise_params
+
+def get_pdf(noise_dist, noise_params):
+    x = np.linspace(-25, 25, 100000)
+    mu = 0
+    
+    if noise_dist == "normal":
+        std_data = noise_params["std"]
+        std_data = np.mean(std_data)
+
+        if isinstance(std_data, float):
+            std = std_data
+        else:
+            std = std_data[freq_ind]
+
+        pdf = (1 / np.sqrt(2 * np.pi * std**2)) * np.exp(
+            -((x - mu) ** 2 / (2 * std**2))
+        )
+
+    if noise_dist == "asym-laplace":
+        lambd, kappa = noise_params["lambd"], noise_params["kappa"]
+        lambd_scaling = noise_params["lambd_scale"]
+
+        lambd = (1 / lambd_scaling) * lambd
+
+        if isinstance(lambd, float):
+            l = lambd
+        else:
+            l = lambd[freq_ind]
+
+        s = np.sign(x - mu)
+        pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
+    
+    return x, pdf
 
 
 def plot_data_pred_histogram(
@@ -766,7 +825,12 @@ def plot_data_pred_histogram(
     freqs = 1 / input_ds["period"]
 
     if "data_true" in input_ds:
-        ax[0, 0].plot(freqs, input_ds["data_true"], zorder=3, label="data_true")
+        ax[0, 0].plot(freqs, input_ds["data_true"], c="white")
+        ax[0, 0].plot(freqs, input_ds["data_true"],
+            c="black",
+            ls=(0, (5, 5)),
+            label="data_true",
+        )
 
     # yerr = input_ds.attrs["noise_percent"]
     yerr = None
@@ -782,8 +846,11 @@ def plot_data_pred_histogram(
 
     # get data prediction
     pred_ind = np.argmax(results_ds["logL"].values)
-    ax[0, 0].scatter(
-        freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
+    # ax[0, 0].scatter(
+    #     freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred"
+    # )
+    ax[0, 0].plot(
+        freqs, results_ds["data_pred"].isel(step=pred_ind), zorder=3, label="data_pred", c="red"
     )
     # estimated error
     # *** depends if it's a percent error or not
@@ -802,7 +869,7 @@ def plot_data_pred_histogram(
     ax[0, 0].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
     # fig.colorbar(im, ax=ax, label="count")
 
-    ax[0, 0].set_ylim([0, 1.0])
+    # ax[0, 0].set_ylim([0, 1.0])
     ax[0, 0].set_xscale("log")
     ax[0, 0].set_xlabel("frequency (Hz)")
     ax[0, 0].set_ylabel("velocity (km/s)")
@@ -811,7 +878,7 @@ def plot_data_pred_histogram(
 
     ax[0, 1].axhline(y=0, c="black")
     residuals = (
-        results_ds["data_pred"].isel(step=pred_ind) - input_ds["data_obs"]
+        input_ds["data_obs"] - results_ds["data_pred"].isel(step=pred_ind)
     )  #  / input_ds.attrs["noise_percent"]
     ax[0, 1].scatter(freqs, residuals)
 
@@ -819,17 +886,31 @@ def plot_data_pred_histogram(
     ax[0, 1].set_xlabel("frequency (Hz)")
     ax[0, 1].set_ylabel(
         # "standardized residuals\n(data pred - data obs) / noise percent"
-        "residuals\n(data pred - data obs)"
+        "residuals\n(data obs - data pred)"
     )
 
     # plot residuals as histogram
     ax[1, 1].hist(residuals, bins=16)
+
+    # plot pdf overtop
+    noise_dist = input_ds.attrs["noise_dist"]
+    inv_noise_dist = input_ds.attrs["inv_noise_dist"]
+    noise_params = get_noise_params(noise_dist, input_ds, inv=False)
+    inv_noise_params = get_noise_params(inv_noise_dist, input_ds, inv=True)
+    x, pdf = get_pdf(noise_dist, noise_params)
+    inv_x, inv_pdf = get_pdf(inv_noise_dist, inv_noise_params)
+
+    ax[1, 1].plot(x, pdf, label="noise dist")
+    ax[1, 1].plot(inv_x, inv_pdf, label="model noise dist")
+    
     ax[1, 1].axvline(x=0, c="black")
     ax[1, 1].set_xlabel(
         # "standardized residuals\n(data pred - data obs) / noise percent"
         "residuals\n(data pred - data obs)"
     )
     ax[1, 1].set_ylabel("counts")
+    ax[1, 1].set_xlim([-0.5, 0.5])
+    ax[1, 1].legend()
 
     # plot data predictions - data obs
     # print(results_ds["data_pred"].shape)
@@ -1051,13 +1132,22 @@ def plot_data_pred_validate(
 
     # plot data pred from model params
     periods = input_ds["period"].values
+    # periods_ = periods
+    periods_ = np.flip(1 / np.logspace(-2, 1.5, 100))
+    freqs_ = 1 / periods_
     # read in model params
     model_params = results_ds["model_params"].values
     depth_inds = input_ds["depth_inds"]
     vel_s_inds = input_ds["vel_s_inds"]
 
-    ind_min = np.argmin(model_params[vel_s_inds][2, :20000])
-    ind_max = np.argmax(model_params[vel_s_inds][2, :20000])
+    data_preds, hist_freqs = [], []
+    for i in range(model_params.shape[1]):
+        data_pred = forward_model(periods_, model_params[:, i], depth_inds, vel_s_inds)
+        data_preds.append(data_pred)
+        hist_freqs += list(freqs_)
+
+        ax[1].plot(freqs_, data_pred, c="black", alpha=0.3)
+    data_preds = np.array(data_preds).flatten()
 
     print(model_params[:, :20000][:, ind_min])
     print(model_params[:, :20000][:, ind_max])
@@ -1072,7 +1162,7 @@ def plot_data_pred_validate(
 
         ax[1].plot(freqs, data_pred)
     data_preds = np.array(data_preds).flatten()
-    """
+    
     ax[1].errorbar(
         freqs,
         input_ds["data_obs"],
@@ -1091,7 +1181,6 @@ def plot_data_pred_validate(
     # estimated error
     # *** depends if it's a percent error or not
     # yerr = input_ds.attrs["sigma_data"] * results_ds["data_prob"]
-    """
     # make log spaced freq bin sizes
     freq_bins = np.logspace(
         np.log10(np.min(freqs)), np.log10(np.max(freqs)), len(freqs) + 1
@@ -1101,7 +1190,7 @@ def plot_data_pred_validate(
     # ax[1].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
     # fig.colorbar(im, ax=ax, label="count")
 
-    ax[1].set_ylim([0.15, 0.80])
+    ax[1].set_ylim([0.1, 1.2])
     ax[1].set_xscale("log")
     ax[1].set_xlabel("frequency (Hz)")
     ax[1].set_ylabel("velocity (km/s)")
@@ -1110,7 +1199,11 @@ def plot_data_pred_validate(
 
     if save:
         plt.savefig(
-            "figures/" + out_filename + "/data-validate-" + out_filename + ".png"
+            "figures/"
+            + out_filename
+            + "/data-validate-line-ex-"
+            + out_filename
+            + ".png"
         )
     else:
         plt.show()
@@ -1942,15 +2035,14 @@ def plot_surface_waves(input_ds, results_ds, n_bins=100, save=False, out_filenam
         plt.show()
 
 
-def plot_poster_results(input_ds, results_ds, n_bins=100, save=False, out_filename=""):
-    fig = plt.figure()
-    gs = GridSpec(6, 3, figure=fig)
+def plot_poster_results_data(
+    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+):
+    plt.clf()
+    # fig = plt.figure(figsize=(10, 18))
 
-    # Add subplots with custom spans
-    ax1 = fig.add_subplot(gs[0:3, 0:])  # data pred hist
-    ax2 = fig.add_subplot(gs[3:5, 1:])  # depth profile
-    ax3 = fig.add_subplot(gs[3:5, 0], sharey=ax2)  # depth marginal
-    ax4 = fig.add_subplot(gs[6, 1:], sharex=ax2)  # vel s marginals
+    # ax = fig.add_subplot()  # data pred hist
+    fig, ax = plt.subplots(1, 1, figsize=(14, 10))
 
     # n_burn = input_ds.attrs["n_burn"]
     n_burn = int(len(results_ds["step"]) / 3)
@@ -1960,18 +2052,27 @@ def plot_poster_results(input_ds, results_ds, n_bins=100, save=False, out_filena
 
     freqs = 1 / input_ds["period"]
 
-    ax1.plot(freqs, input_ds["data_true"], zorder=3, label="data_true", c="red")
+    ax.plot(freqs, input_ds["data_true"], zorder=3, c="white", linewidth=3)
+    ax.plot(
+        freqs,
+        input_ds["data_true"],
+        zorder=3,
+        label="true data",
+        c="black",
+        ls=(0, (5, 5)),
+        linewidth=3,
+    )
 
     # yerr = input_ds.attrs["noise_percent"]
-    yerr = None
-    ax1.errorbar(
+    # yerr = None
+    ax.scatter(
         freqs,
         input_ds["data_obs"],
-        yerr,
-        fmt="o",
+        # fmt="o",
         zorder=3,
-        c="orange",
-        label="data_obs",
+        c="white",
+        edgecolor="black",
+        label="observed data",
     )
 
     # get data prediction
@@ -1993,15 +2094,43 @@ def plot_poster_results(input_ds, results_ds, n_bins=100, save=False, out_filena
     )
     data_bins = np.linspace(np.min(data_preds), np.max(data_preds), n_bins)
 
-    ax1.hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
+    h = ax.hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
     # fig.colorbar(im, ax=ax, label="count")
 
-    ax1.set_ylim([0, 1.0])
-    ax1.set_xscale("log")
-    ax1.set_xlabel("frequency (Hz)")
-    ax1.set_ylabel("velocity (km/s)")
+    ax.set_xticks([1, 2, 3, 4, 5, 6, 7, 8, 9, 10])
+    ax.set_ylim([0.2, 1.0])
+    ax.set_xscale("log")
+    ax.set_xlabel("frequency (Hz)", fontsize=20)
+    ax.set_ylabel("phase velocity (km/s)", fontsize=20)
 
-    ax1.legend()
+    cb = fig.colorbar(h[3], ax=ax)
+    cb.set_ticks([])
+
+    ax.legend(fontsize=18)
+    ax.tick_params(axis="both", which="major", labelsize=18)
+
+    if save:
+        plt.savefig("figures/" + out_filename + "/poster-data-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def plot_poster_results_profile(
+    input_ds, results_ds, n_bins=100, save=False, out_filename=""
+):
+    fig = plt.figure(figsize=(10, 12), constrained_layout=True)
+    gs = GridSpec(3, 3, figure=fig)
+
+    # Add subplots with custom spans
+    ax1 = fig.add_subplot(gs[0:2, 1:])  # depth profile
+    ax2 = fig.add_subplot(gs[0:2, 0], sharey=ax1)  # depth marginal
+    ax3 = fig.add_subplot(gs[2, 1:], sharex=ax1)  # vel s marginals
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
 
     # PROFILE
 
@@ -2077,7 +2206,7 @@ def plot_poster_results(input_ds, results_ds, n_bins=100, save=False, out_filena
         true_model.append([true_depth_plotting[layer_ind + 1], true_vel_s[layer_ind]])
 
     counts[counts == 0] = np.nan
-    h = ax2.imshow(
+    h = ax1.imshow(
         counts,
         extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
         aspect="auto",
@@ -2086,55 +2215,83 @@ def plot_poster_results(input_ds, results_ds, n_bins=100, save=False, out_filena
 
     # plot true model overtop
     true_model = np.array(true_model)
-    ax2.plot(true_model[:, 1], true_model[:, 0], c="red")
+    ax1.plot(true_model[:, 1], true_model[:, 0], c="white", linewidth=3)
+    ax1.plot(
+        true_model[:, 1],
+        true_model[:, 0],
+        c="black",
+        ls=(0, (5, 5)),
+        label="true model",
+        linewidth=3,
+    )
+    ax1.legend(fontsize=18)
 
-    fig.colorbar(h, ax=ax2)
-    ax2.set_xlabel("vel s (km/s)")
+    cb = fig.colorbar(h, ax=ax1)
+    cb.set_ticks([])
+    # cb.set_label("counts", fontsize=20)
+    # cb.ax.tick_params(labelsize=16)
+    # ax2.set_xlabel("vel s (km/s)")
 
     # make these tick labels invisible
-    ax2.tick_params("y", labelleft=False)
+    ax1.tick_params("y", labelleft=False)
 
     # plot depth histogram
     for ind in range(input_ds.attrs["n_layers"]):
-        ax3.hist(
+        ax2.hist(
             depth[ind],
             bins=depth_bins,
             density=True,
             orientation="horizontal",
+            color="darkgrey",
         )
+        # ax2.axhline(true_depth, c="red")
+        ax2.axhline(true_depth, c="white", linewidth=3)
+        ax2.axhline(true_depth, c="black", ls=(0, (5, 5)), linewidth=3)
 
-    ax3.set_ylim(
+    ax2.set_ylim(
         [
             np.min(depth_bounds[:, 0]) * 1000,
             np.max(depth_bounds[:, 1]) * 1000,
         ]
     )
-    ax3.set_ylabel("depth (m)")
+    ax2.set_ylabel("depth (m)", fontsize=20)
 
-    ax3.set_xlim(ax3.get_xlim()[::-1])
-    plt.gca().invert_yaxis()
+    ax2.set_xlim(ax2.get_xlim()[::-1])
+    ax2.set_ylim(ax2.get_ylim()[::-1])
+
+    # plt.gca().invert_yaxis()
 
     # plot vel s histogram
     for ind in range(input_ds.attrs["n_layers"] + 1):
-        ax4.hist(
+        if ind == 0:
+            c = "darkgrey"
+        else:
+            c = "dimgrey"
+        ax3.hist(
             vel_s[ind],
             bins=vel_s_bins,
             density=True,
-            orientation="horizontal",
+            color=c,
+            label="Vs " + str(ind + 1),
         )
+        # ax3.axvline(true_vel_s[ind], c="red")
+        ax3.axvline(true_vel_s[ind], c="white", linewidth=3)
+        ax3.axvline(true_vel_s[ind], c="black", ls=(0, (5, 5)), linewidth=3)
 
-    vel_s_bounds = input_ds["param_bounds"][vel_s_inds]
-    ax4.set_ylim(
-        [
-            np.min(vel_s_bounds[:, 0]),
-            np.max(vel_s_bounds[:, 1]),
-        ]
-    )
-    ax4.set_ylabel("vel s")
+    ax3.legend(fontsize=18)
 
-    plt.tight_layout()
+    ax3.set_xlim([0.2, 1.2])
+    ax3.set_xlabel("shear velocity (km/s)", fontsize=20)
+
+    ax1.tick_params(axis="both", which="major", labelsize=18)
+    ax2.tick_params(axis="both", which="major", labelsize=18)
+    ax3.tick_params(axis="both", which="major", labelsize=18)
+
+    # plt.tight_layout()
 
     if save:
-        plt.savefig("figures/" + out_filename + "/poster-" + out_filename + ".png")
+        plt.savefig(
+            "figures/" + out_filename + "/poster-profile-" + out_filename + ".png"
+        )
     else:
         plt.show()

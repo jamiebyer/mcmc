@@ -33,8 +33,13 @@ class Data:
             "attrs": {"noise_dist": self.noise_dist},
         }
 
-        # for k, v in self.noise_params.items():
-        #     data_dict["attrs"][k] = v
+        for k, v in self.noise_params.items():
+            if isinstance(v, list):
+                data_dict["data_vars"][k] = {"dims": ["period"], "data": v}
+            elif isinstance(v, bool):
+                data_dict["attrs"][k] = np.sum(v)
+            else:
+                data_dict["attrs"][k] = v
 
         return data_dict
 
@@ -57,6 +62,8 @@ class SyntheticData(Data):
         self.data_true = data_true
 
         # for frequency dependent noise, scale using the true data
+        # for percent scaling
+        """
         if noise_params["frequency_scaling"]:
             if noise_dist == "normal":
                 noise_params["std"] = noise_params["std_percent"] * data_true
@@ -64,7 +71,7 @@ class SyntheticData(Data):
                 noise_params["lambd_scale"] = (
                     noise_params["lambd_scale_percent"] * data_true
                 )
-
+        """
         # generate observed data
         data_obs = self.generate_observed_data(periods, noise_dist, noise_params)
 
@@ -124,12 +131,12 @@ class SyntheticData(Data):
             # AL_q_5_list, AL_q_95_list = [], []
             # norm_q_5_list, norm_q_95_list = [], []
 
-            # get lambda scaling from noise_params
+            # get lambda scaling from noise_paramslambd_max
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
             lambd_scaling = noise_params["lambd_scale"]
 
             mu = 0
-            lambd = (1 / lambd_scaling) * lambd
+            lambd = lambd_scaling * lambd
 
             # for each frequency, define the pdf for the error distribution
             # integrate to get the cdf
@@ -183,12 +190,15 @@ class SyntheticData(Data):
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
             lambd_scaling = noise_params["lambd_scale"]
 
-            lambd = (1 / lambd_scaling) * lambd
+            lambd = lambd_scaling * lambd
 
             if isinstance(lambd, float):
                 l = lambd
             else:
                 l = lambd[freq_ind]
+
+            # if "lambd_max" in noise_params and l >= noise_params["lambd_max"]:
+            #    l = noise_params["lambd_max"]
 
             s = np.sign(x - mu)
             pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
@@ -334,8 +344,9 @@ class SyntheticData(Data):
 
             plt.legend(fontsize=18)
 
-            # plt.xlim([-0.1, 1.5])
-            plt.xlim([0.4, 1.4])
+            plt.xlim([-0.1, 1.5])
+            # plt.xlim([0.4, 1.4])
+            # plt.xlim([0.4, 1.4])
             plt.xlabel("velocity (km/s)", fontsize=20)
             plt.ylabel("counts", fontsize=20)
             plt.tick_params(axis="both", which="major", labelsize=18)
