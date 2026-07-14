@@ -60,6 +60,14 @@ def plot_results(
         plot_prob_model=plot_prob_model,
         plot_true_model=plot_true_model,
     )
+    resulting_model_histogram_shallow(
+        input_ds,
+        results_ds,
+        save=True,
+        out_filename=out_filename,
+        plot_prob_model=plot_prob_model,
+        plot_true_model=plot_true_model,
+    )
     plot_data_pred_histogram(input_ds, results_ds, save=True, out_filename=out_filename)
     # plot_data_pred_frequencies(
     #     input_ds, results_ds, save=True, out_filename=out_filename
@@ -490,12 +498,12 @@ def model_params_histogram(
         plt.show()
 
 
-def model_params_histogram_compare(
+def compare_model_params_histogram(
     input_ds_list,
     results_ds_list,
     n_bins=100,
     save=False,
-    # out_filename="",
+    out_filename="",
     plot_prob_model=False,
     plot_true_model=False,
 ):
@@ -511,22 +519,7 @@ def model_params_histogram_compare(
     :param results_ds:
     """
 
-    n_layers = input_ds_list[0].attrs["n_layers"]
-
-    param_types = ["depth", "vel_s"]
-    n_param_types = len(param_types)
-
-    fig, ax = plt.subplots(
-        nrows=n_layers + 1,
-        ncols=n_param_types,
-        sharex="col",
-        figsize=(14, 8),
-    )
-
-    for ind in range(len(input_ds_list)):
-        input_ds = input_ds_list[ind]
-        results_ds = results_ds_list[ind]
-
+    for i in len(input_ds_list):
         # use input_ds to interpret results_ds
         # n_burn = input_ds.attrs["n_burn"]
         n_burn = int(len(results_ds["step"]) / 3)
@@ -544,8 +537,17 @@ def model_params_histogram_compare(
         if plot_prob_model:
             probable_model = results_ds["prob_params"]
 
+        param_types = ["depth", "vel_s"]
+        n_param_types = len(param_types)
+
         # one column for depth, one for vel_s
         n_layers = input_ds.attrs["n_layers"]
+        fig, ax = plt.subplots(
+            nrows=n_layers + 1,
+            ncols=n_param_types,
+            sharex="col",
+            figsize=(14, 8),
+        )
 
         # loop over all params and plot
         # use param inds to get param name
@@ -561,9 +563,9 @@ def model_params_histogram_compare(
                 # full bounds
                 ax[r_ind, c_ind].set_xlim([full_bounds[0], full_bounds[1]])
                 # param bounds
-                # ax[r_ind, c_ind].axvspan(
-                #     bounds[r_ind][0], bounds[r_ind][1], color="blue", alpha=0.1
-                # )
+                ax[r_ind, c_ind].axvspan(
+                    bounds[r_ind][0], bounds[r_ind][1], color="blue", alpha=0.1
+                )
                 ax[r_ind, c_ind].axvline(bounds[r_ind][0], c="black")
                 ax[r_ind, c_ind].axvline(bounds[r_ind][1], c="black")
 
@@ -573,15 +575,11 @@ def model_params_histogram_compare(
                     n_bins,
                 )
                 # param timeseries
-                ax[r_ind, c_ind].hist(
-                    unit_scale * p, bins=bins, density=True, histtype="step"
-                )
+                ax[r_ind, c_ind].hist(unit_scale * p, bins=bins, density=True)
 
                 # true model
                 if plot_true_model:
-                    ax[r_ind, c_ind].axvline(
-                        unit_scale * true_model[inds][r_ind], c="red"
-                    )
+                    ax[r_ind, c_ind].axvline(unit_scale * true_model[inds][r_ind], c="red")
 
                 # most probable model
                 if plot_prob_model:
@@ -595,7 +593,127 @@ def model_params_histogram_compare(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/hist_compare.png")
+        plt.savefig("figures/" + out_filename + "/hist-" + out_filename + ".png")
+    else:
+        plt.show()
+
+def model_params_histogram_compare(
+    input_ds_list,
+    results_ds_list,
+    n_bins=100,
+    save=False,
+    # out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+    attrs=None,
+):
+    """
+    plot model params vs. time step.
+    plot likelihood vs. time step.
+    plot acceptance rate vs. time step.
+
+    plot param bounds as black vertical lines.
+    plot true model as red vertical lines.
+
+    :param input_ds:
+    :param results_ds:
+    """
+
+    # all files should share parameter / layer information, same true model
+
+    n_layers = input_ds_list[0].attrs["n_layers"]
+
+    param_types = ["depth", "vel_s"]
+    n_param_types = len(param_types)
+
+    fig, ax = plt.subplots(
+        nrows=n_layers + 1,
+        ncols=n_param_types,
+        sharex="col",
+        figsize=(14, 8),
+    )
+
+    input_ds = input_ds_list[0]
+    results_ds = results_ds_list[0]
+
+    # use input_ds to interpret results_ds
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    # true model
+    if plot_true_model:
+        true_model = input_ds["model_true"]
+
+    # one column for depth, one for vel_s
+    n_layers = input_ds.attrs["n_layers"]
+    
+
+    # loop over all params and plot
+    # use param inds to get param name
+    for c_ind, param in enumerate(param_types):
+        unit_scale = 1
+        if param == "depth":
+            unit_scale = 1000  # unit conversion to m
+        inds = input_ds[param + "_inds"]
+        bounds = unit_scale * input_ds["param_bounds"][inds]
+        full_bounds = [np.min(bounds[:, 0]), np.max(bounds[:, 1])]
+
+        for r_ind in range(len(model_params[inds])):
+            attr_vals = []
+            p_vals = []
+            for ind in range(len(input_ds_list)):
+                p = results_ds_list[ind]["model_params"].values[inds][r_ind]
+                p_vals += list(unit_scale * np.array(p))
+                if attrs is None:
+                    attr = input_ds_list[ind].attrs["kappa"]
+                else:
+                    attr = attrs[ind]
+                attr_vals += [attr] * len(p)
+
+            # full bounds
+            ax[r_ind, c_ind].set_ylim([full_bounds[0], full_bounds[1]])
+            # param bounds
+            ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
+            ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
+
+            x_bins = np.linspace(np.min(attr_vals), np.max(attr_vals), len(input_ds_list)+1)
+            y_bins = np.linspace(
+                bounds[r_ind][0],
+                bounds[r_ind][1],
+                n_bins,
+            )
+            # param timeseries
+            attr_vals = np.array(attr_vals)
+            p_vals = np.array(p_vals)
+            ax[r_ind, c_ind].hist2d(attr_vals, p_vals, bins=[x_bins, y_bins], cmin=1)
+
+            # true model
+            if plot_true_model:
+                ax[r_ind, c_ind].axhline(
+                    unit_scale * true_model[inds][r_ind], c="white"
+                )
+                ax[r_ind, c_ind].axhline(
+                    unit_scale * true_model[inds][r_ind], 
+                    c="black",
+                    ls=(0, (5, 5)),
+                )
+
+            # axis labels
+            # ax[r_ind, c_ind].set_xlabel("kappa")
+            ax[r_ind, c_ind].set_xlabel("lambda scale")
+            ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
+
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/hist_compare_norm_mag.png")
+        # plt.savefig("figures/hist_compare_AL_mag.png")
     else:
         plt.show()
 
@@ -710,6 +828,13 @@ def resulting_model_histogram(
             density=True,
             orientation="horizontal",
         )
+        true_depth = true_params[depth_inds][ind] * 1000
+        ax1.axhline(true_depth, c="white")
+        ax1.axhline(true_depth,
+            c="black",
+            ls=(0, (5, 5)),
+            label="true model",
+        )
 
     ax1.set_ylim(
         [
@@ -754,6 +879,169 @@ def resulting_model_histogram(
     else:
         plt.show()
 
+
+def resulting_model_histogram_shallow(
+    input_ds,
+    results_ds,
+    n_bins=250,
+    save=False,
+    out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+):
+    """
+    plot the resulting model as velocity vs. depth
+    with the histogram of probability for the depth of the layer
+    """
+
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    # true model
+    if plot_true_model:
+        true_params = input_ds["model_true"].values
+
+    # define hist bins between bounds
+    # use param inds to get depth, and use min and max of all depth bounds
+    depth_bounds = input_ds["param_bounds"][input_ds["depth_inds"]]
+    depth_bins = (
+        np.linspace(
+            np.min(depth_bounds[:, 0]),
+            np.max(depth_bounds[:, 1]),
+            n_bins,
+        )
+        * 1000
+    )  # unit conversion
+    vel_s_bounds = input_ds["param_bounds"][input_ds["vel_s_inds"]]
+    vel_s_bins = np.linspace(
+        np.min(vel_s_bounds[:, 0]), np.max(vel_s_bounds[:, 1]), n_bins
+    )
+    counts = np.zeros((n_bins, n_bins))
+
+    # loop over every resulting model
+    # add vel_s 1 to hist bins above depth
+    # add vel_s 2 to hist bins below depth
+
+    depth_inds = input_ds["depth_inds"]
+    vel_s_inds = input_ds["vel_s_inds"]
+
+    n_steps = len(results_ds["step"])
+
+    depth = model_params[depth_inds] * 1000  # unit conversion to m
+    depth_plotting = np.concatenate(
+        (
+            np.zeros((1, n_steps)),
+            depth,
+            np.full((1, n_steps), np.max(depth_bounds[:, 1])) * 1000,  # unit conversion
+        ),
+        axis=0,
+    )
+    vel_s = model_params[vel_s_inds]
+
+    # for each layer
+    # for each sample / step
+    for layer_ind in range(input_ds.attrs["n_layers"] + 1):
+        for step_ind in range(n_steps):
+            # find bin index closest to layer depth
+            depth_upper_inds = np.argmin(
+                abs(depth_bins - depth_plotting[layer_ind, step_ind])
+            )
+            depth_lower_inds = np.argmin(
+                abs(depth_bins - depth_plotting[layer_ind + 1, step_ind])
+            )
+            # find bin index closest to layer vel_s
+            vel_s_close_inds = np.argmin(abs(vel_s_bins - vel_s[layer_ind, step_ind]))
+
+            counts[depth_upper_inds:depth_lower_inds, vel_s_close_inds] += 1
+
+    # plot true model overtop
+    if plot_true_model:
+        true_depth = true_params[depth_inds] * 1000
+        true_vel_s = true_params[vel_s_inds]
+        true_depth_plotting = np.concatenate(
+            ([0], true_depth, [np.max(depth_bounds[:, 1]) * 1000])
+        )
+
+        true_model = []
+        for layer_ind in range(input_ds.attrs["n_layers"] + 1):
+            true_model.append([true_depth_plotting[layer_ind], true_vel_s[layer_ind]])
+            true_model.append(
+                [true_depth_plotting[layer_ind + 1], true_vel_s[layer_ind]]
+            )
+
+    fig = plt.figure()
+    gs = GridSpec(1, 3, figure=fig)
+
+    # Add subplots with custom spans
+    ax1 = fig.add_subplot(gs[0, 0])
+    ax2 = fig.add_subplot(gs[0, 1:], sharey=ax1)
+
+    # plot depth histogram
+    for ind in range(input_ds.attrs["n_layers"]):
+        ax1.hist(
+            depth[ind],
+            bins=depth_bins,
+            density=True,
+            orientation="horizontal",
+        )
+        true_depth = true_params[depth_inds][ind] * 1000
+        ax1.axhline(true_depth, c="white")
+        ax1.axhline(true_depth,
+            c="black",
+            ls=(0, (5, 5)),
+            label="true model",
+        )
+
+    ax1.set_ylim(
+        [
+            np.min(depth_bounds[:, 0]) * 1000,
+            30
+            # np.max(depth_bounds[:, 1]) * 1000,
+        ]
+    )
+    ax1.set_ylabel("Depth (m)")
+
+    ax1.set_xlim(ax1.get_xlim()[::-1])
+    plt.gca().invert_yaxis()
+
+    counts[counts == 0] = np.nan
+    h = ax2.imshow(
+        counts,
+        extent=[vel_s_bins[0], vel_s_bins[-1], depth_bins[-1], depth_bins[0]],
+        aspect="auto",
+        interpolation="none",
+    )
+
+    # plot true model overtop
+    if plot_true_model:
+        true_model = np.array(true_model)
+        ax2.plot(true_model[:, 1], true_model[:, 0], c="white")
+        ax2.plot(true_model[:, 1], true_model[:, 0],
+            c="black",
+            ls=(0, (5, 5)),
+            label="true model",
+        )
+
+    fig.colorbar(h, ax=ax2)
+    ax2.set_xlabel("Shear-wave velocity (km/s)")
+    ax2.set_xlim([0, 1.0])
+
+    # make these tick labels invisible
+    ax2.tick_params("y", labelleft=False)
+
+    plt.legend()
+    plt.tight_layout()
+
+    if save:
+        plt.savefig("figures/" + out_filename + "/profile-shallow-" + out_filename + ".png")
+    else:
+        plt.show()
 
 def get_noise_params(noise_dist, input_ds, inv):
     if inv:
@@ -869,7 +1157,7 @@ def plot_data_pred_histogram(
     ax[0, 0].hist2d(hist_freqs, data_preds, bins=[freq_bins, data_bins], cmin=1)
     # fig.colorbar(im, ax=ax, label="count")
 
-    # ax[0, 0].set_ylim([0, 1.0])
+    ax[0, 0].set_ylim([0.05, 1.6])
     ax[0, 0].set_xscale("log")
     ax[0, 0].set_xlabel("frequency (Hz)")
     ax[0, 0].set_ylabel("velocity (km/s)")
@@ -897,11 +1185,11 @@ def plot_data_pred_histogram(
     inv_noise_dist = input_ds.attrs["inv_noise_dist"]
     noise_params = get_noise_params(noise_dist, input_ds, inv=False)
     inv_noise_params = get_noise_params(inv_noise_dist, input_ds, inv=True)
-    x, pdf = get_pdf(noise_dist, noise_params)
-    inv_x, inv_pdf = get_pdf(inv_noise_dist, inv_noise_params)
+    # x, pdf = get_pdf(noise_dist, noise_params)
+    # inv_x, inv_pdf = get_pdf(inv_noise_dist, inv_noise_params)
 
-    ax[1, 1].plot(x, pdf, label="noise dist")
-    ax[1, 1].plot(inv_x, inv_pdf, label="model noise dist")
+    # ax[1, 1].plot(x, pdf, label="noise dist")
+    # ax[1, 1].plot(inv_x, inv_pdf, label="model noise dist")
     
     ax[1, 1].axvline(x=0, c="black")
     ax[1, 1].set_xlabel(

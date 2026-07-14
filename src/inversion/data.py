@@ -148,7 +148,7 @@ class SyntheticData(Data):
                     l = lambd
                 else:
                     l = lambd[ind]
-
+                
                 s = np.sign(x - mu)
                 pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
 

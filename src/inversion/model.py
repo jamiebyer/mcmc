@@ -435,7 +435,9 @@ class Model:
             lambd_scale = noise_params["lambd_scale"]
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
 
-            lambd = (1 / lambd_scale) * lambd
+            lambd = lambd_scale * lambd
+            if "lambd_max" in noise_params:
+                lambd[lambd >= noise_params["lambd_max"]] = noise_params["lambd_max"]
             s = np.sign(residuals)
 
             logL = np.sum(
