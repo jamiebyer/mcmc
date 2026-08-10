@@ -597,6 +597,7 @@ def compare_model_params_histogram(
     else:
         plt.show()
 
+
 def model_params_histogram_compare(
     input_ds_list,
     results_ds_list,
@@ -673,7 +674,8 @@ def model_params_histogram_compare(
                 if attrs is None:
                     attr = input_ds_list[ind].attrs["kappa"]
                 else:
-                    attr = attrs[ind]
+                    attr = input_ds_list[ind].attrs["lambd"]
+                    # attr = attrs[ind]
                 attr_vals += [attr] * len(p)
 
             # full bounds
@@ -682,10 +684,10 @@ def model_params_histogram_compare(
             ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
             ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
 
-            x_bins = np.linspace(np.min(attr_vals), np.max(attr_vals), len(input_ds_list)+1)
+            x_bins = np.linspace(np.min(attr_vals), np.max(attr_vals), len(np.unique(attr_vals))+1)
             y_bins = np.linspace(
-                bounds[r_ind][0],
-                bounds[r_ind][1],
+                bounds[r_ind][0].values,
+                bounds[r_ind][1].values,
                 n_bins,
             )
             # param timeseries
@@ -712,8 +714,133 @@ def model_params_histogram_compare(
     plt.tight_layout()
 
     if save:
-        plt.savefig("figures/hist_compare_norm_mag.png")
+        # plt.savefig("figures/hist_compare_norm_mag.png")
         # plt.savefig("figures/hist_compare_AL_mag.png")
+        plt.savefig("figures/hist_compare_AL_mag_0.75.png")
+    else:
+        plt.show()
+
+
+def model_params_histogram_ensemble(
+    input_ds_list,
+    results_ds_list,
+    n_bins=100,
+    save=False,
+    # out_filename="",
+    plot_prob_model=False,
+    plot_true_model=False,
+    attrs=None,
+):
+    """
+    plot model params vs. time step.
+    plot likelihood vs. time step.
+    plot acceptance rate vs. time step.
+
+    plot param bounds as black vertical lines.
+    plot true model as red vertical lines.
+
+    :param input_ds:
+    :param results_ds:
+    """
+
+    # all files should share parameter / layer information, same true model
+
+    n_layers = input_ds_list[0].attrs["n_layers"]
+
+    param_types = ["depth", "vel_s"]
+    n_param_types = len(param_types)
+
+    fig, ax = plt.subplots(
+        nrows=n_layers + 1,
+        ncols=n_param_types,
+        sharex="col",
+        figsize=(14, 8),
+    )
+
+    input_ds = input_ds_list[0]
+    results_ds = results_ds_list[0]
+
+    # use input_ds to interpret results_ds
+    # n_burn = input_ds.attrs["n_burn"]
+    n_burn = int(len(results_ds["step"]) / 3)
+
+    # cut results by step
+    results_ds = results_ds.copy().isel(step=slice(n_burn, len(results_ds["step"])))
+
+    # use results_ds to get model params
+    model_params = results_ds["model_params"].values
+
+    # true model
+    if plot_true_model:
+        true_model = input_ds["model_true"]
+
+    # one column for depth, one for vel_s
+    n_layers = input_ds.attrs["n_layers"]
+    
+
+    # loop over all params and plot
+    # use param inds to get param name
+    for c_ind, param in enumerate(param_types):
+        unit_scale = 1
+        if param == "depth":
+            unit_scale = 1000  # unit conversion to m
+        inds = input_ds[param + "_inds"]
+        bounds = unit_scale * input_ds["param_bounds"][inds]
+        full_bounds = [np.min(bounds[:, 0]), np.max(bounds[:, 1])]
+
+        for r_ind in range(len(model_params[inds])):
+            attr_vals = []
+            p_vals = []
+            for ind in range(len(input_ds_list)):
+                p = results_ds_list[ind]["model_params"].values[inds][r_ind]
+                p_vals += list(unit_scale * np.array(p))
+                if attrs is None:
+                    attr = input_ds_list[ind].attrs["kappa"]
+                else:
+                    attr = input_ds_list[ind].attrs["lambd"]
+                    # attr = attrs[ind]
+                attr_vals += [attr] * len(p)
+
+            # full bounds
+            ax[r_ind, c_ind].set_ylim([full_bounds[0], full_bounds[1]])
+            # param bounds
+            ax[r_ind, c_ind].axhline(bounds[r_ind][0], c="black")
+            ax[r_ind, c_ind].axhline(bounds[r_ind][1], c="black")
+
+            x_bins = np.linspace(np.min(attr_vals), np.max(attr_vals), len(np.unique(attr_vals))+1)
+            y_bins = np.linspace(
+                bounds[r_ind][0].values,
+                bounds[r_ind][1].values,
+                n_bins,
+            )
+            # param timeseries
+            attr_vals = np.array(attr_vals)
+            p_vals = np.array(p_vals)
+            ax[r_ind, c_ind].hist2d(attr_vals, p_vals, bins=[x_bins, y_bins], cmin=1)
+
+            # true model
+            if plot_true_model:
+                ax[r_ind, c_ind].axhline(
+                    unit_scale * true_model[inds][r_ind], c="white"
+                )
+                ax[r_ind, c_ind].axhline(
+                    unit_scale * true_model[inds][r_ind], 
+                    c="black",
+                    ls=(0, (5, 5)),
+                )
+
+            # axis labels
+            # ax[r_ind, c_ind].set_xlabel("kappa")
+            ax[r_ind, c_ind].set_xlabel("lambda scale")
+            ax[r_ind, c_ind].set_ylabel(param + " " + str(r_ind + 1))
+
+    plt.tight_layout()
+
+    if save:
+        # plt.savefig("figures/hist_compare_norm_mag.png")
+        # plt.savefig("figures/hist_compare_AL_mag.png")
+        plt.savefig("figures/hist_compare_AL_mag_1.0.png")
+        # plt.savefig("figures/hist_compare_norm_mag_1.0.png")
     else:
         plt.show()
 
@@ -1043,6 +1170,7 @@ def resulting_model_histogram_shallow(
     else:
         plt.show()
 
+
 def get_noise_params(noise_dist, input_ds, inv):
     if inv:
         prefix = "inv_"
@@ -1050,15 +1178,20 @@ def get_noise_params(noise_dist, input_ds, inv):
         prefix = ""
     
     noise_params = {}
-    noise_params["frequency_scaling"] = (input_ds.attrs[prefix + "frequency_scaling"] == 1)
+    noise_params["lambd_scaling"] = (input_ds.attrs[prefix + "lambd_scaling"] == 1)
+    noise_params["kappa_scaling"] = (input_ds.attrs[prefix + "kappa_scaling"] == 1)
     if noise_dist == "normal":
         noise_params["std"] = input_ds.attrs[prefix + "std"]
     elif noise_dist == "asym-laplace":
         noise_params["lambd"] = input_ds.attrs[prefix + "lambd"]
         noise_params["kappa"] = input_ds.attrs[prefix + "kappa"]
-        noise_params["lambd_scale"] = input_ds.attrs[prefix + "lambd_scale"]
+        if prefix + "lambd_scale" in input_ds.attrs:
+            noise_params["lambd_scale"] = input_ds.attrs[prefix + "lambd_scale"]
+        if prefix + "kappa_scale" in input_ds.attrs:
+            noise_params["kappa_scale"] = input_ds.attrs[prefix + "kappa_scale"]
     
     return noise_params
+
 
 def get_pdf(noise_dist, noise_params):
     x = np.linspace(-25, 25, 100000)
@@ -1217,6 +1350,74 @@ def plot_data_pred_histogram(
 
     if save:
         plt.savefig("figures/" + out_filename + "/data-" + out_filename + ".png")
+    else:
+        plt.show()
+
+
+def plot_data_obs_ensemble(
+    input_ds_list, 
+    # results_ds_list,
+    attrs, 
+    save=False, 
+    out_filename="",
+):
+    """
+    """
+
+    # for each attr, plot the obs data (separately)
+    input_ds = input_ds_list[0]
+    # results_ds = results_ds_list[0]
+
+    # n_burn = input_ds.attrs["n_burn"]
+    # n_burn = int(len(results_ds["step"]) / 3)
+
+    freqs = 1 / input_ds["period"]
+
+    n_rows, n_cols = 3, 4
+    # n_rows, n_cols = 2, 2
+    fig, ax = plt.subplots(nrows=n_rows, ncols=n_cols, figsize=(20, 14))
+
+    if "data_true" in input_ds:
+        for r in range(n_rows):
+            for c in range(n_cols):
+                ax[r, c].plot(freqs, input_ds["data_true"], c="white")
+                ax[r, c].plot(freqs, input_ds["data_true"],
+                    c="black",
+                    ls=(0, (5, 5)),
+                    label="data_true",
+                )
+                if (r*n_cols)+c < len(attrs):
+                    ax[r, c].set_title(attrs[(r*n_cols)+c])
+
+    for ind in range(len(input_ds_list)):
+        attr = input_ds_list[ind].attrs["lambd"]
+        # attr = input_ds_list[ind].attrs["kappa"]
+        i = attrs.index(attr)
+
+        r_i = int(np.floor(i/n_cols))
+        c_i = i%n_cols
+
+        # get attribute and corresponding row/col ind
+        ax[r_i, c_i].scatter(
+            freqs,
+            input_ds_list[ind]["data_obs"],
+            zorder=3,
+            label="data_obs",
+            c="black",
+            alpha=0.5
+        )
+
+    for r in range(n_rows):
+        for c in range(n_cols):
+            ax[r, c].set_ylim([0.05, 1.6])
+            ax[r, c].set_xscale("log")
+            ax[r, c].set_xlabel("frequency (Hz)")
+            ax[r, c].set_ylabel("velocity (km/s)")
+            # ax[r, c].legend()
+
+
+    if save:
+        plt.savefig("figures/" + out_filename + "_data-ensemble-" + out_filename + ".png")
     else:
         plt.show()
 

@@ -131,12 +131,16 @@ class SyntheticData(Data):
             # AL_q_5_list, AL_q_95_list = [], []
             # norm_q_5_list, norm_q_95_list = [], []
 
+            mu = 0
+
             # get lambda scaling from noise_params
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-            lambd_scaling = noise_params["lambd_scale"]
-
-            mu = 0
-            lambd = lambd_scaling * lambd
+            if noise_params["lambd_scaling"]:
+                lambd_scaling = noise_params["lambd_scale"]
+                lambd = lambd_scaling * lambd
+            elif noise_params["kappa_scaling"]:
+                kappa_scaling = noise_params["kappa_scale"]
+                kappa = kappa_scaling * kappa
 
             # for each frequency, define the pdf for the error distribution
             # integrate to get the cdf
@@ -148,9 +152,14 @@ class SyntheticData(Data):
                     l = lambd
                 else:
                     l = lambd[ind]
+
+                if isinstance(kappa, float):
+                    k = kappa
+                else:
+                    k = kappa[ind]
                 
                 s = np.sign(x - mu)
-                pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
+                pdf = (l / (k + 1 / k)) * np.exp(-(x - mu) * l * s * k**s)
 
                 # integrate distribution
                 # the cdf should go from 0 to 1
@@ -168,6 +177,7 @@ class SyntheticData(Data):
 
             data_obs = self.data_true + noise
 
+        print(data_obs[:7])
         return data_obs
 
     @staticmethod
@@ -188,17 +198,26 @@ class SyntheticData(Data):
 
         if noise_dist == "asym-laplace":
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
-            lambd_scaling = noise_params["lambd_scale"]
 
-            lambd = lambd_scaling * lambd
+            if noise_params["lambd_scaling"]:
+                lambd_scaling = noise_params["lambd_scale"]
+                lambd = lambd_scaling * lambd
+            elif noise_params["kappa_scaling"]:
+                kappa_scaling = noise_params["kappa_scale"]
+                kappa = kappa_scaling * kappa
 
             if isinstance(lambd, float):
                 l = lambd
             else:
                 l = lambd[freq_ind]
 
+            if isinstance(kappa, float):
+                k = kappa
+            else:
+                k = kappa[freq_ind]
+
             s = np.sign(x - mu)
-            pdf = (l / (kappa + 1 / kappa)) * np.exp(-(x - mu) * l * s * kappa**s)
+            pdf = (l / (k + 1 / k)) * np.exp(-(x - mu) * l * s * k**s)
 
         # integrate distribution
         # the cdf should go from 0 to 1

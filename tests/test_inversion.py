@@ -8,7 +8,7 @@ from inversion.inversion import Inversion
 from inversion.model_params import DispersionCurveParams
 
 
-np.random.seed(0)
+# np.random.seed(0)
 
 
 def setup_test_data(model_params, noise, depth, vel_s):

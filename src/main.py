@@ -17,7 +17,6 @@ from plotting.plot_dispersion_curve import *
 
 import xarray as xr
 
-np.random.seed(0)
 
 
 def setup_test_data(model_params, noise_dist, noise_params, depth, vel_s):
@@ -115,6 +114,9 @@ def basic_inversion(
     inv_noise_dist,
     inv_noise_params,
     set_starting_model,
+    set_random_seed,
+    save_essentials,
+    out_dir,
     out_filename,
 ):
     """
@@ -123,14 +125,17 @@ def basic_inversion(
     """
 
     inversion_init_kwargs = {
-        "n_burn": 10000,
+        "n_burn": 100,
         "n_chunk": 500,
-        "n_mcmc": 100000,
+        "n_mcmc": 1000,
         "n_cov_chunk": 500,
-        "n_thin": 10,
+        "n_thin": 1000,
         "n_chains": 1,
         "beta_spacing_factor": 1.15,
         "set_starting_model": set_starting_model,
+        "set_random_seed": set_random_seed,
+        "save_essentials": save_essentials,
+        "out_dir": out_dir,
         "out_filename": out_filename,
     }
 
@@ -257,25 +262,27 @@ def basic_inversion(
     return inversion, model_params
 
 
-def get_noise_params():
-    pass
-
-
 def run_inversion(
     n_layers=2,
-    noise_dist="normal",
-    # noise_dist="asym-laplace",
+    # noise_dist="normal",
+    noise_dist="asym-laplace",
     # inv_noise_dist="normal",
     inv_noise_dist="asym-laplace",
-    frequency_scaling=True,
+    lambd_scaling=False,
+    kappa_scaling=True,
     sample_prior=False,
     set_starting_model=True,
     rotate=False,
-    std=None, # 0.075  # km/s
+    # std=None,
+    std=0.075,  # km/s
     std_percent=None, # 0.10
-    lambd_scale=None,
     lambd=None,
+    lambd_scale=None,
     kappa=None,
+    kappa_scale=None,
+    set_random_seed=True,
+    save_essentials=False,
+    out_dir="./results/inversion/",
     out_filename="",
     ind=None
 ):
@@ -284,52 +291,54 @@ def run_inversion(
     - Run with 1 layer, 2 layers.
     - Run with low noise, medium noise, high noise.
     """
-    noise_params = {"frequency_scaling": frequency_scaling}
+    noise_params = {"lambd_scaling": lambd_scaling, "kappa_scaling": kappa_scaling}
     if noise_dist == "normal":
-        if frequency_scaling:
-            # for normal errors with frequency dependence,
-            # use the percent of the data as the standard deviation
-            noise_params["std_percent"] = std_percent
-        else:
-            # for IID errors, the value for normal standard deviation
-            noise_params["std"] = std
+        # for normal errors with frequency dependence,
+        # use the percent of the data as the standard deviation
+        # noise_params["std_percent"] = std_percent
+        
+        # for IID errors, the value for normal standard deviation
+        noise_params["std"] = std
 
     elif noise_dist == "asym-laplace":
         # lambd_scale = 1.0  # 0.055 # 0.130 # 0.200 # km/s
-        # lambd_scale_percent = 0.10
         # lambd, kappa = 14.03508769968587, 1.0 # normal std = 0.025
-        # lambd, kappa = 1, 0.9364592177215896  # site WH01
-        # lambd, kappa = 1, 0.8638603408785489 # site WH04
-
-        # lambd, kappa = 1, 1.0
-
+        
         # lambd, kappa = 39.13138936314191, 1.0 # std=0.025
         # lambd, kappa = 12.273994073235064, 1.0 # std=0.075
 
+        # lambd, kappa = 1.0, 1.0
+
+        
+        # kappa_scaling
+        lambd, kappa = 63.21939218002945, 1.0
+
+        # both_scaling
+        # lambd, kappa = 1.0, 1.0
+        
+
         noise_params["lambd"] = lambd
         noise_params["kappa"] = kappa
-        if frequency_scaling:
-            # scaling by percent
-            # noise_params["lambd_scale_percent"] = lambd_scale_percent
-            # scaling by field data
-            
-            df = pd.read_csv("./data/spread/WH01-asym-laplace-params.csv")
-            # df = pd.read_csv("./data/spread/WH04-asym-laplace-params.csv")
+
+        if lambd_scaling or kappa_scaling:
+            # df = pd.read_csv("./data/remove_artifact_True/both_scaling/WH01-asym-laplace-params.csv")
+            df = pd.read_csv("./data/remove_artifact_True/kappa_scaling/WH01-asym-laplace-params.csv")
             noise_params["scale_freqs"] = df["freqs"].values
-            noise_params["lambd_scale"] = np.flip(df["scaled_lambd"].values)
-            noise_params["lambd_scale"][noise_params["lambd_scale"] > 60] = 60 # WH01
-            # noise_params["lambd_scale"][noise_params["lambd_scale"] > 90] = 90 # WH04
-            # noise_params["lambd_scale"][noise_params["lambd_scale"] > 75] = 75 
+            if lambd_scaling:  
+                noise_params["lambd_scale"] = np.flip(df["scaled_lambd"].values.copy())
+                # noise_params["lambd_scale"][noise_params["lambd_scale"] > 60] = 60 # WH01
+            if kappa_scaling:
+                noise_params["kappa_scale"] = np.flip(df["scaled_kappa"].values.copy())
         else:
             # IID lambda scale
             noise_params["lambd_scale"] = lambd_scale
-            """
-            # scaling by field data
-            df = pd.read_csv("./data/spread/WH04.csv")
-            noise_params["scale_freqs"] = df["freq"].values
-            noise_params["lambd_scale"] = df["spread"].values
-            """
-    inv_noise_params = {"frequency_scaling": noise_params["frequency_scaling"]}
+
+    # inv_noise_params = {"frequency_scaling": noise_params["frequency_scaling"]}
+    inv_noise_params = {
+        "lambd_scaling": noise_params["lambd_scaling"], 
+        "kappa_scaling": noise_params["kappa_scaling"]
+    }
+    # inv_noise_params = noise_params.copy()
 
     # currently set up to use same noise params for real noise and for model noise
     inversion, model_params = basic_inversion(
@@ -340,8 +349,12 @@ def run_inversion(
         inv_noise_dist=inv_noise_dist,
         inv_noise_params=inv_noise_params,
         set_starting_model=set_starting_model,
+        set_random_seed=set_random_seed,
+        save_essentials=save_essentials,
+        out_dir=out_dir,
         out_filename=out_filename,
     )
+
     inversion.random_walk(
         model_params,
         proposal_distribution="cauchy",
@@ -380,15 +393,31 @@ def plot_compare(file_names):
     )
 
 
-def run_compare_inversions(ind):
+def run_inversion_ensemble(job_id, task_id, n_runs):
+    # print(job_id, task_id)
+    inv_noise_dist = "normal" # "asym-laplace"
+    # kappa = 1.0 # 0.75
+    kappa = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    kappa_list = []
+    for k in kappa:
+        kappa_list += n_runs * [k]
 
-    inv_noise_dist = "asym-laplace" # "normal"
-    kappa = 0.75
+    # lambd = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+    lambd = 1.0
 
-    lambd = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
+    # lambd_list = []
+    # for l in lambd:
+    #     lambd_list += n_runs * [l]
 
-    out_filename = str(kappa) + "/" + inv_noise_dist + "/" + str(lambd[ind])
+    # out_dir = "/scratch/" + str(job_id) + "/"
+    out_dir = "./results/inversion/"#  + str(job_id) + "/"
+    # os.mkdir(out_dir)
 
+    # out_filename = str(kappa) + "/" + inv_noise_dist + "/" + str(lambd_list[task_id]) + "-" + str(task_id)
+    out_filename = "l-" + str(lambd) + "/" + inv_noise_dist + "/" + str(kappa_list[task_id]) + "-" + str(task_id)
+    # out_filename = str(kappa) + "/" + inv_noise_dist + "/" + str(lambd) + "-" + str(task_id)
+    # out_filename = str(kappa) + "-" + inv_noise_dist + "-" + str(lambd) + "-" + str(task_id)
+    # print(out_filename)
 
     run_inversion(
         n_layers=2,
@@ -404,29 +433,99 @@ def run_compare_inversions(ind):
         std=None, # 0.075  # km/s
         std_percent=None, # 0.10
         lambd_scale=None,
-        lambd=lambd[ind],
-        kappa=0.75,
+        # lambd=lambd_list[task_id],
+        lambd=lambd,
+        # kappa=kappa,
+        kappa=kappa_list[task_id],
+        set_random_seed=False,
+        save_essentials=True,
+        out_dir=out_dir,
         out_filename=out_filename,
         ind=None
     )
 
-def plot_compare_inversions():
-    # inv_noise_dist = "asym-laplace"
-    inv_noise_dist = "normal"
-    kappa = 0.75
 
+def assemble_ensemble_files(job_id):
+    inv_noise_dist = "asym-laplace" # "normal"
+    kappa = 0.75 # 1.0
+    lambd = 0.5
+
+    out_dir = "/scratch/" + str(job_id) + "/"
+    out_filename = str(kappa) + "-" + inv_noise_dist + "-" + str(lambd)
+
+    input_paths, results_paths = [], []
+    input_files, results_files = [], []
+    print(os.listdir(out_dir), "\n")
+    print(out_filename, "\n")
+    for f in os.listdir(out_dir):
+        if "input-" in f and out_filename in f:
+            input_paths.append(out_dir + f)
+            input_files.append(xr.open_dataset(out_dir + f))
+        elif "results-" in f and out_filename in f:
+            results_paths.append(out_dir + f)
+            results_files.append(xr.open_dataset(out_dir + f))
+
+    # ds = xr.concat(input_files, dim="ind", combine_attrs="identical")
+    # print(ds)
+    # print("\n", ds.attrs.keys())
+    # print("\n", ds.dims.keys())
+    # ds.to_netcdf("results/inversion/" + str(kappa) + "/" + inv_noise_dist + "/" + "input-" + str(lambd))
+    # ds.to_zarr("results/inversion/" + str(kappa) + "/" + inv_noise_dist + "/" + "input-" + str(lambd))
+
+    print(len(results_files))
+    # ds = xr.concat(results_files, dim="ind")
+    # ds.to_netcdf("results/inversion/" + str(kappa) + "/" + inv_noise_dist + "/" + "results-" + str(lambd))
+    # ds.to_zarr("results/inversion/" + str(kappa) + "/" + inv_noise_dist + "/" + "results-" + str(lambd))
+
+    # loop over saved paths and delete them
+    # [os.remove(f) for f in input_paths]
+    # [os.remove(f) for f in results_paths]
+
+
+def plot_ensemble_inversions():
+    inv_noise_dist = "asym-laplace"
+    # inv_noise_dist = "normal"
+    kappa = 1.0 # 0.75
+    # kappa = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
+    # lambd = 1.0
     lambd = [0.5, 0.6, 0.7, 0.8, 0.9, 1.0, 1.1, 1.2, 1.3, 1.4, 1.5]
 
-    file_list = [inv_noise_dist + "-" + str(kappa) + "-" + str(l) for l in lambd]
+    # file_list = [inv_noise_dist + "-" + str(kappa) + "-" + str(l) for l in lambd]
 
-    model_params_histogram_compare(
-        input_ds_list=[xr.open_dataset("./results/inversion/input-" + f + ".nc") for f in file_list],
-        results_ds_list=[xr.open_dataset("./results/inversion/results-" + f + ".nc") for f in file_list],
+    dir_path = "./results/inversion/" + str(kappa) + "/" + inv_noise_dist
+    # dir_path = "./results/inversion/l-" + str(lambd) + "/" + inv_noise_dist
+    input_list, results_list = [], []
+    for f in os.listdir(dir_path):
+        if "input-" in f:
+            input_list.append(xr.open_dataset(dir_path + "/" + f))
+            # input_list.append(xr.open_zarr(dir_path + "/" + f))
+        elif "results-" in f:
+            results_list.append(xr.open_dataset(dir_path + "/" + f))
+            # results_list.append(xr.open_zarr(dir_path + "/" + f))
+
+    # plot generated observed data
+    plot_data_obs_ensemble(
+        input_list, 
+        # results_ds_list,
+        # attrs=kappa,
+        attrs=lambd,
+        save=True, 
+        out_filename=inv_noise_dist + "-k-" + str(kappa)
+        # out_filename=inv_noise_dist + "-l-" + str(lambd)
+    )
+
+    # plot model params
+    """
+    model_params_histogram_ensemble(
+        # input_ds_list=[xr.open_dataset("./results/inversion/input-" + f + ".nc") for f in file_list],
+        # results_ds_list=[xr.open_dataset("./results/inversion/results-" + f + ".nc") for f in file_list],
+        input_ds_list=input_list,
+        results_ds_list=results_list,
         save=True,
         plot_true_model=True,
         attrs=lambd,
     )
-
+    """
 
 if __name__ == "__main__":
     """
@@ -434,10 +533,14 @@ if __name__ == "__main__":
     python -m cProfile -o profiling_stats.prof src/main.py
     snakeviz profiling_stats.prof
     """
-    ind = int(sys.argv[1])
-    run_compare_inversions(ind)
+    # job_id = int(sys.argv[1])
+    # task_id = int(sys.argv[2])
+    # run_inversion_ensemble(job_id, task_id, n_runs=10)
 
-    # plot_compare_inversions()
+    # assemble_ensemble_files(45017762)
+    
+    # plot_ensemble_inversions()
+
 
     # run_inversion()
 
@@ -527,4 +630,8 @@ if __name__ == "__main__":
     # noise AL, model: normal
     # file_name = "1783016057"
 
-    # plot_inversion(file_name)
+    # kappa scaling
+    file_name = "1786303466"
+
+
+    plot_inversion(file_name)

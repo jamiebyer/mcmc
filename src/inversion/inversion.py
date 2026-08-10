@@ -4,16 +4,15 @@ import sys
 from disba import PhaseDispersion
 from disba._exception import DispersionError
 from inversion.model import Model
-from dask.distributed import Client
+# from dask.distributed import Client
 import os
 import xarray as xr
 import time
 from copy import deepcopy
-import dask.dataframe as dd
+# import dask.dataframe as dd
 
 # from netCDF4 import Dataset
-import h5py
-
+# import h5py
 
 class Inversion:
     def __init__(
@@ -30,8 +29,11 @@ class Inversion:
         n_chains=1,
         individual_acceptance=False,
         beta_spacing_factor=None,
+        out_dir="./results/inversion/",
         out_filename=None,
         set_starting_model=False,
+        set_random_seed=False,
+        save_essentials=False,
     ):
         """
         :param n_data: number of data observed.
@@ -52,6 +54,9 @@ class Inversion:
         - run with linearization
         - run with parallel tempering/ chains
         """
+        print("random seed: ", set_random_seed)
+        if set_random_seed:
+            np.random.seed(0)
 
         self.data = data
 
@@ -62,6 +67,7 @@ class Inversion:
         self.n_thin = n_thin
 
         self.individual_acceptance = individual_acceptance
+        self.save_essentials = save_essentials
 
         # initialize chains, generate starting params.
         self.model_params = model_params
@@ -79,7 +85,7 @@ class Inversion:
         # set initial likelihood ***
 
         # *** need a check for if the file exists ***
-        self.out_dir = "./results/inversion/"
+        self.out_dir = out_dir
         if not out_filename:
             self.out_filename = str(int(time.time()))
         else:
@@ -130,6 +136,7 @@ class Inversion:
         if os.path.isfile(out_path):
             raise PermissionError("File already exists.")
         input_ds.to_netcdf(out_path)
+        # input_ds.to_zarr(out_path)
 
     def define_results_dataset(self, model_params):
         # write empty dataset to file, with coord for n_data
@@ -146,89 +153,114 @@ class Inversion:
         if os.path.isfile(out_path):
             raise PermissionError("File already exists.")
         ds.to_netcdf(out_path)
+        # ds.to_zarr(out_path)
 
-        self.ds_storage = {
-            "coords": {
-                "period": {"dims": "period", "data": self.data.periods},
-                "n_model_params": {
-                    "dims": "n_model_params",
-                    "data": np.arange(model_params.n_model_params),
+        if self.save_essentials:
+            self.ds_storage = {
+                "coords": {
+                    "period": {"dims": "period", "data": self.data.periods},
+                    "n_model_params": {
+                        "dims": "n_model_params",
+                        "data": np.arange(model_params.n_model_params),
+                    },
+                    "n_model_params_y": {
+                        "dims": "n_model_params_y",
+                        "data": np.arange(model_params.n_model_params),
+                    },
+                    "step": {"dims": "step", "data": np.arange(self.n_chunk)},
                 },
-                "n_model_params_y": {
-                    "dims": "n_model_params_y",
-                    "data": np.arange(model_params.n_model_params),
-                },
-                "step": {"dims": "step", "data": np.arange(self.n_chunk)},
-            },
-            "data_vars": {
-                "model_params": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "logL": {"dims": ["step"], "data": np.empty(self.n_chunk)},
-                "cov_mat": {
-                    "dims": ["n_model_params", "n_model_params_y", "step"],
-                    "data": np.empty(
-                        (
-                            model_params.n_model_params,
-                            model_params.n_model_params,
-                            self.n_chunk,
-                        )
-                    ),
-                },
-                "proposal_width": {
-                    "dims": ["n_model_params", "step"],
-                    "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                },
-                "data_pred": {
-                    "dims": ["period", "step"],
-                    "data": np.empty((self.data.n_data, self.n_chunk)),
-                },
-            },
-        }
-        # acceptance rates / errors
-        if self.individual_acceptance:
-            self.ds_storage["data_vars"].update(
-                {
-                    "acc_rate": {
+                "data_vars": {
+                    "model_params": {
                         "dims": ["n_model_params", "step"],
                         "data": np.empty((model_params.n_model_params, self.n_chunk)),
                     },
-                    "bounds_err": {
-                        "dims": ["n_model_params", "step"],
-                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                    },
-                    "physics_err": {
-                        "dims": ["n_model_params", "step"],
-                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                    },
-                    "fm_err": {
-                        "dims": ["n_model_params", "step"],
-                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
-                    },
-                }
-            )
+                },
+            }
+                        
         else:
-            self.ds_storage["data_vars"].update(
-                {
-                    "acc_rate": {
-                        "dims": ["step"],
-                        "data": np.empty(self.n_chunk),
+
+            self.ds_storage = {
+                "coords": {
+                    "period": {"dims": "period", "data": self.data.periods},
+                    "n_model_params": {
+                        "dims": "n_model_params",
+                        "data": np.arange(model_params.n_model_params),
                     },
-                    "bounds_err": {
-                        "dims": ["step"],
-                        "data": np.empty(self.n_chunk),
+                    "n_model_params_y": {
+                        "dims": "n_model_params_y",
+                        "data": np.arange(model_params.n_model_params),
                     },
-                    "physics_err": {
-                        "dims": ["step"],
-                        "data": np.empty(self.n_chunk),
+                    "step": {"dims": "step", "data": np.arange(self.n_chunk)},
+                },
+                "data_vars": {
+                    "model_params": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
                     },
-                    "fm_err": {
-                        "dims": ["step"],
-                        "data": np.empty(self.n_chunk),
+                    "logL": {"dims": ["step"], "data": np.empty(self.n_chunk)},
+                    "cov_mat": {
+                        "dims": ["n_model_params", "n_model_params_y", "step"],
+                        "data": np.empty(
+                            (
+                                model_params.n_model_params,
+                                model_params.n_model_params,
+                                self.n_chunk,
+                            )
+                        ),
                     },
-                }
-            )
+                    "proposal_width": {
+                        "dims": ["n_model_params", "step"],
+                        "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                    },
+                    "data_pred": {
+                        "dims": ["period", "step"],
+                        "data": np.empty((self.data.n_data, self.n_chunk)),
+                    },
+                },
+            }
+            # acceptance rates / errors
+            if self.individual_acceptance:
+                self.ds_storage["data_vars"].update(
+                    {
+                        "acc_rate": {
+                            "dims": ["n_model_params", "step"],
+                            "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                        },
+                        "bounds_err": {
+                            "dims": ["n_model_params", "step"],
+                            "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                        },
+                        "physics_err": {
+                            "dims": ["n_model_params", "step"],
+                            "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                        },
+                        "fm_err": {
+                            "dims": ["n_model_params", "step"],
+                            "data": np.empty((model_params.n_model_params, self.n_chunk)),
+                        },
+                    }
+                )
+            else:
+                self.ds_storage["data_vars"].update(
+                    {
+                        "acc_rate": {
+                            "dims": ["step"],
+                            "data": np.empty(self.n_chunk),
+                        },
+                        "bounds_err": {
+                            "dims": ["step"],
+                            "data": np.empty(self.n_chunk),
+                        },
+                        "physics_err": {
+                            "dims": ["step"],
+                            "data": np.empty(self.n_chunk),
+                        },
+                        "fm_err": {
+                            "dims": ["step"],
+                            "data": np.empty(self.n_chunk),
+                        },
+                    }
+                )
 
     def get_optimization_model(
         self,
@@ -379,6 +411,7 @@ class Inversion:
         filename = self.out_filename.split("/")[-1]
         out_path = self.out_dir + self.out_filename + ".nc"
         out_path = out_path.replace(filename, "results-" + filename)
+        print("out_path", out_path)
 
         # create empty file to save results
         # define dict for saving results
@@ -386,15 +419,6 @@ class Inversion:
 
         # all chains need to be on the same step number to compare
         for n_steps in range(self.n_mcmc):
-            if n_steps == 1000:
-                print(n_steps)
-            elif n_steps == 40000:
-                print(n_steps)
-            elif n_steps == 60000:
-                print(n_steps)
-            elif n_steps == 80000:
-                print(n_steps)
-
             delayed_results = []  # format for parallelizing later
             for ind in range(self.n_chains):
                 chain_model = self.chains[ind]
@@ -440,51 +464,55 @@ class Inversion:
         for chain in self.chains:
             # saving the chain model with beta of 1
             if chain.beta == 1:
-                # update storage dataset with new param values
-                model_params = chain.model_params.model_params.copy()
-                self.ds_storage["data_vars"]["model_params"]["data"][
-                    :, n_save
-                ] = chain.model_params.model_params.copy()
-                self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
-                self.ds_storage["data_vars"]["cov_mat"]["data"][
-                    :, :, n_save
-                ] = chain.cov_mat
-                self.ds_storage["data_vars"]["proposal_width"]["data"][
-                    :, n_save
-                ] = chain.proposal_width
-                self.ds_storage["data_vars"]["data_pred"]["data"][
-                    :, n_save
-                ] = chain.data_pred.copy()
-
-                # acceptance rate
-                if self.individual_acceptance:
-                    self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
-                        chain.acceptance_rate["acc_rate"]
-                    )
-                    # error ratio
-                    self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
-                        chain.acceptance_rate["bounds_err_ratio"]
-                    )
-                    self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
-                        chain.acceptance_rate["physics_err_ratio"]
-                    )
-                    self.ds_storage["data_vars"]["fm_err"]["data"][:, n_save] = (
-                        chain.acceptance_rate["fm_err_ratio"]
-                    )
+                if self.save_essentials:
+                    self.ds_storage["data_vars"]["model_params"]["data"][
+                        :, n_save
+                    ] = chain.model_params.model_params.copy()
                 else:
-                    self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
-                        chain.acceptance_rate["acc_rate"]
-                    )
-                    # error ratio
-                    self.ds_storage["data_vars"]["bounds_err"]["data"][n_save] = (
-                        chain.acceptance_rate["bounds_err_ratio"]
-                    )
-                    self.ds_storage["data_vars"]["physics_err"]["data"][n_save] = (
-                        chain.acceptance_rate["physics_err_ratio"]
-                    )
-                    self.ds_storage["data_vars"]["fm_err"]["data"][n_save] = (
-                        chain.acceptance_rate["fm_err_ratio"]
-                    )
+                    # update storage dataset with new param values
+                    self.ds_storage["data_vars"]["model_params"]["data"][
+                        :, n_save
+                    ] = chain.model_params.model_params.copy()
+                    self.ds_storage["data_vars"]["logL"]["data"][n_save] = chain.logL
+                    self.ds_storage["data_vars"]["cov_mat"]["data"][
+                        :, :, n_save
+                    ] = chain.cov_mat
+                    self.ds_storage["data_vars"]["proposal_width"]["data"][
+                        :, n_save
+                    ] = chain.proposal_width
+                    self.ds_storage["data_vars"]["data_pred"]["data"][
+                        :, n_save
+                    ] = chain.data_pred.copy()
+
+                    # acceptance rate
+                    if self.individual_acceptance:
+                        self.ds_storage["data_vars"]["acc_rate"]["data"][:, n_save] = (
+                            chain.acceptance_rate["acc_rate"]
+                        )
+                        # error ratio
+                        self.ds_storage["data_vars"]["bounds_err"]["data"][:, n_save] = (
+                            chain.acceptance_rate["bounds_err_ratio"]
+                        )
+                        self.ds_storage["data_vars"]["physics_err"]["data"][:, n_save] = (
+                            chain.acceptance_rate["physics_err_ratio"]
+                        )
+                        self.ds_storage["data_vars"]["fm_err"]["data"][:, n_save] = (
+                            chain.acceptance_rate["fm_err_ratio"]
+                        )
+                    else:
+                        self.ds_storage["data_vars"]["acc_rate"]["data"][n_save] = (
+                            chain.acceptance_rate["acc_rate"]
+                        )
+                        # error ratio
+                        self.ds_storage["data_vars"]["bounds_err"]["data"][n_save] = (
+                            chain.acceptance_rate["bounds_err_ratio"]
+                        )
+                        self.ds_storage["data_vars"]["physics_err"]["data"][n_save] = (
+                            chain.acceptance_rate["physics_err_ratio"]
+                        )
+                        self.ds_storage["data_vars"]["fm_err"]["data"][n_save] = (
+                            chain.acceptance_rate["fm_err_ratio"]
+                        )
 
     def write_samples(self, n_steps, out_path):
         """
@@ -511,12 +539,16 @@ class Inversion:
         # *** change later to use context manager ***
         ds_full = xr.open_dataset(out_path).load()
         ds_full.close()
+        
         # append along diff values for step
         ds_new = xr.Dataset.from_dict(self.ds_storage)
 
         ds = xr.concat([ds_full, ds_new], dim="step", data_vars="minimal")
 
+        # ds_new.to_zarr(out_path, append_dim="step")
+
         ds.to_netcdf(out_path, compute=False)
+        
         # update step number on dict storage
         self.ds_storage["coords"]["step"]["data"] += self.n_chunk
 

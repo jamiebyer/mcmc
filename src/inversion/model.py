@@ -432,10 +432,15 @@ class Model:
             logL = -np.sum((residuals**2) / (2 * sigma_data**2))
 
         elif noise_dist == "asym-laplace":
-            lambd_scale = noise_params["lambd_scale"]
             lambd, kappa = noise_params["lambd"], noise_params["kappa"]
 
-            lambd = lambd_scale * lambd
+            if noise_params["lambd_scaling"]:
+                lambd_scale = noise_params["lambd_scale"]
+                lambd = lambd_scale * lambd
+            elif noise_params["lambd_scaling"]:
+                kappa_scale = noise_params["kappa_scale"]
+                kappa = kappa_scale * kappa
+            
             if "lambd_max" in noise_params:
                 lambd[lambd >= noise_params["lambd_max"]] = noise_params["lambd_max"]
             s = np.sign(residuals)
