@@ -87,7 +87,7 @@ def generate_model(ind):
     noise: [25, 75]
     thickness 1: [10, 20, 30]
     thickness 2: [10, 20, 30, 40, 50, 60]
-    vel s 1: [150, 200, 300, 400, 500] 
+    vel s 1: [150, 200, 300, 400, 500]
     vel s 2: [300, 400, 500, 600, 700, 800]
     vel s 3: [600, 800, 1000, 1200, 1500]
     """
@@ -99,12 +99,12 @@ def generate_model(ind):
                 for v2 in [0.300, 0.400, 0.500, 0.600, 0.700, 0.800]:
                     for v3 in [0.600, 0.800, 1.000, 1.200, 1.500]:
                         if v1 < v2 and v2 < v3:
-                            depth = [t1, t1+t2]
+                            depth = [t1, t1 + t2]
                             vel_s = [v1, v2, v3]
                             d_list.append(depth)
                             v_list.append(vel_s)
-    print(len(d_list))
     return d_list[ind], v_list[ind]
+
 
 def basic_inversion(
     ind,
@@ -189,7 +189,8 @@ def basic_inversion(
         norm_q_higher,
         stds,
     )
-    """
+    # """
+    # raise ValueError
 
     # use synthetic noise dist to define normal model noise params
     if noise_dist == "asym-laplace" and inv_noise_dist == "normal":
@@ -273,9 +274,9 @@ def run_inversion(
     sample_prior=False,
     set_starting_model=True,
     rotate=False,
-    # std=None,
-    std=0.075,  # km/s
-    std_percent=None, # 0.10
+    std=None,  # 0.075  # km/s
+    std_percent=None,  # 0.10
+    lambd_scale=None,
     lambd=None,
     lambd_scale=None,
     kappa=None,
@@ -284,7 +285,7 @@ def run_inversion(
     save_essentials=False,
     out_dir="./results/inversion/",
     out_filename="",
-    ind=None
+    ind=None,
 ):
     """
     - Run with sampling prior. Run with setting the starting model, run without.
@@ -430,8 +431,8 @@ def run_inversion_ensemble(job_id, task_id, n_runs):
         sample_prior=False,
         set_starting_model=True,
         rotate=False,
-        std=None, # 0.075  # km/s
-        std_percent=None, # 0.10
+        std=None,  # 0.075  # km/s
+        std_percent=None,  # 0.10
         lambd_scale=None,
         # lambd=lambd_list[task_id],
         lambd=lambd,
@@ -441,7 +442,7 @@ def run_inversion_ensemble(job_id, task_id, n_runs):
         save_essentials=True,
         out_dir=out_dir,
         out_filename=out_filename,
-        ind=None
+        ind=None,
     )
 
 
@@ -542,7 +543,7 @@ if __name__ == "__main__":
     # plot_ensemble_inversions()
 
 
-    # run_inversion()
+    run_inversion()
 
     # 1 layer
     # normal IID

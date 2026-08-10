@@ -283,6 +283,12 @@ class SyntheticData(Data):
             stds,
         )
 
+    def fit_error_dist(error_dist):
+        """
+        Fit error distribution with Asymmetric Laplacian.
+        """
+        pass
+
     def plot_simulated_data_frequencies(
         self,
         freqs_2d,
@@ -354,8 +360,9 @@ class SyntheticData(Data):
 
             plt.legend(fontsize=18)
 
-            # plt.xlim([-0.1, 1.5])
-            plt.xlim([0.4, 1.4])
+            plt.xlim([-0.1, 1.5])
+            # plt.xlim([0.4, 1.4])
+            # plt.xlim([0.4, 1.4])
             plt.xlabel("velocity (km/s)", fontsize=20)
             plt.ylabel("counts", fontsize=20)
             plt.tick_params(axis="both", which="major", labelsize=18)
